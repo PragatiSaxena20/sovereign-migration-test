@@ -17,7 +17,11 @@ from sovereign import (
 )
 from sovereign.response_class import json_response_class
 from sovereign.error_info import ErrorInfo
-from sovereign.middlewares import LoggingMiddleware, RequestContextLogMiddleware
+from sovereign.middlewares import (
+    LoggingMiddleware,
+    RequestContextLogMiddleware,
+    ZipkinMiddleware,
+)
 from sovereign.utils.resources import get_package_file
 from sovereign.views import admin, crypto, discovery, healthchecks, interface
 
@@ -81,6 +85,7 @@ def init_app() -> FastAPI:
 
     application.add_middleware(RequestContextLogMiddleware)
     application.add_middleware(LoggingMiddleware)
+    application.add_middleware(ZipkinMiddleware)
 
     if SENTRY_INSTALLED and SENTRY_DSN:
         sentry_sdk.init(SENTRY_DSN)

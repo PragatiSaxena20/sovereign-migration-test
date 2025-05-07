@@ -1,7 +1,10 @@
 import zlib
 from typing import Any
 
+from sovereign.tracing.spans import zipkin_span
 
+
+@zipkin_span(name="hashing")
 def compute_hash(*args: Any) -> str:
     """
     Creates a 'version hash' to be used in envoy Discovery Responses.

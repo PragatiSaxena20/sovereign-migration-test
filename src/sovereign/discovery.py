@@ -25,6 +25,7 @@ except ImportError:
 from sovereign import XDS_TEMPLATES, config, template_context, logs
 from sovereign.schemas import DiscoveryRequest, ProcessedTemplate, XdsTemplate
 from sovereign.utils.version_info import compute_hash
+from sovereign.tracing.spans import zipkin_span
 
 try:
     default_templates = XDS_TEMPLATES["default"]
@@ -41,6 +42,7 @@ discovery_types_base: Dict[str, str] = {t: t for t in discovery_types}
 DiscoveryTypes = Enum("DiscoveryTypes", discovery_types_base)  # type: ignore
 
 
+@zipkin_span()
 def select_template(
     request: DiscoveryRequest,
     discovery_type: str,
@@ -64,40 +66,11 @@ def select_template(
         )
 
 
-def response(request: DiscoveryRequest, xds_type: str) -> ProcessedTemplate:
-    """
-    A Discovery **Request** typically looks something like:
-
-    .. code-block:: json
-
-        {
-            "version_info": "0",
-            "node": {
-                "cluster": "T1",
-                "build_version": "<revision hash>/<version>/Clean/RELEASE",
-                "metadata": {
-                    "auth": "..."
-                }
-            }
-        }
-
-    When we receive this, we give the client the latest configuration via a
-    Discovery **Response** that looks something like this:
-
-    .. code-block:: json
-
-        {
-            "version_info": "abcdef1234567890",
-            "resources": []
-        }
-
-    The version_info is derived from :func:`sovereign.discovery.version_hash`
-
-    :param request: An envoy Discovery Request
-    :param xds_type: what type of XDS template to use when rendering
-    :return: An envoy Discovery Response
-    """
-    template: XdsTemplate = select_template(request, xds_type)
+@zipkin_span()
+def gather_context(
+    request: DiscoveryRequest,
+    template: XdsTemplate,
+) -> dict[str, Any]:
     node_context = template_context.get_context(request, template)
     context = dict(
         discovery_request=request,
@@ -105,7 +78,18 @@ def response(request: DiscoveryRequest, xds_type: str) -> ProcessedTemplate:
         resource_names=request.resources,
         **node_context,
     )
-    content = template(**context)
+    return context
+
+
+@zipkin_span()
+def render_template(t: XdsTemplate, c: dict[str, Any]) -> Any:
+    return t(**c)
+
+
+def response(request: DiscoveryRequest, xds_type: str) -> ProcessedTemplate:
+    template: XdsTemplate = select_template(request, xds_type)
+    context = gather_context(request, template)
+    content = render_template(template, context)
 
     # Deserialize YAML output from Jinja2
     if not template.is_python_source:
@@ -142,6 +126,7 @@ def response(request: DiscoveryRequest, xds_type: str) -> ProcessedTemplate:
     )
 
 
+@zipkin_span()
 def deserialize_config(content: str) -> Dict[str, Any]:
     try:
         envoy_configuration = yaml.safe_load(content)
@@ -171,6 +156,7 @@ def deserialize_config(content: str) -> Dict[str, Any]:
     return envoy_configuration
 
 
+@zipkin_span()
 def filter_resources(
     generated: List[Dict[str, Any]], requested: List[str]
 ) -> List[Dict[str, Any]]:

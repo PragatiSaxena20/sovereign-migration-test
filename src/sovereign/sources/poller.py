@@ -1,3 +1,4 @@
+import json
 import asyncio
 import traceback
 from copy import deepcopy
@@ -7,11 +8,7 @@ from typing import Iterable, Any, Dict, List, Union, Type, Optional
 
 from glom import glom, PathAccessError
 
-from sovereign.schemas import (
-    ConfiguredSource,
-    SourceData,
-    Node,
-)
+from sovereign.schemas import ConfiguredSource, SourceData, Node, config
 from sovereign.utils.entry_point_loader import EntryPointLoader
 from sovereign.sources.lib import Source
 from sovereign.modifiers.lib import Modifier, GlobalModifier
@@ -34,6 +31,78 @@ def contains(container: Iterable[Any], item: Any) -> bool:
 
 Mods = Dict[str, Type[Modifier]]
 GMods = Dict[str, Type[GlobalModifier]]
+
+
+def item_comparison(old, new):
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return ["content_changed"]
+
+    changes = []
+    all_keys = set(old.keys()) | set(new.keys())
+
+    for key in sorted(all_keys):
+        old_val = old.get(key)
+        new_val = new.get(key)
+
+        if old_val != new_val:
+            if key not in old:
+                changes.append(f"+{key}:{new_val}")
+            elif key not in new:
+                changes.append(f"-{key}:{old_val}")
+            else:
+                changes.append(f"~{key}:{old_val}→{new_val}")
+
+    return changes
+
+
+def per_field_diff(old, new):
+    changes = []
+    max_len = max(len(old), len(new))
+
+    for i in range(max_len):
+        old_inst = old[i] if i < len(old) else None
+        new_inst = new[i] if i < len(new) else None
+
+        if old_inst is None:
+            changes.append(f"added [index:{i}] {new_inst}")
+        elif new_inst is None:
+            changes.append(f"removed [index:{i}] {old_inst}")
+        elif old_inst != new_inst:
+            field_changes = item_comparison(old_inst, new_inst)
+            if field_changes:
+                changes.append(f"modified [index:{i}]: {', '.join(field_changes)}")
+
+    return changes
+
+
+def source_diff_summary(prev, curr):
+    if prev is None:
+        return [
+            f"scope:{scope} added:{len(instances)} instances"
+            for scope, instances in curr.scopes.items()
+            if instances
+        ]
+
+    summary = []
+    all_scopes = set(prev.scopes.keys()) | set(curr.scopes.keys())
+
+    for scope in sorted(all_scopes):
+        old = prev.scopes.get(scope, [])
+        new = curr.scopes.get(scope, [])
+
+        n_old = len(old)
+        n_new = len(new)
+
+        if n_old == 0 and n_new > 0:
+            summary.append(f"scope:{scope} added:{n_new} instances")
+        elif n_old > 0 and n_new == 0:
+            summary.append(f"scope:{scope} removed:{n_old} instances")
+        elif old != new:
+            detailed_changes = per_field_diff(old, new)
+            if detailed_changes:
+                summary.append(f"scope:{scope} changes: {'; '.join(detailed_changes)}")
+
+    return summary if summary else ["no changes detected"]
 
 
 class SourcePoller:
@@ -179,9 +248,25 @@ class SourcePoller:
         else:
             self.stats.increment("sources.refreshed")
             self.last_updated = datetime.now()
+            old_data = getattr(self, "source_data", None)
             self.instance_count = len(
                 [instance for scope in new.scopes.values() for instance in scope]
             )
+
+            if config.logging.log_source_diffs:
+                diff_summary = source_diff_summary(old_data, new)
+                # printing json directly because the logger is fucking stupid
+                print(
+                    json.dumps(
+                        dict(
+                            event="Sources refreshed with changes",
+                            level="info",
+                            diff=diff_summary,
+                            total_instances=self.instance_count,
+                        )
+                    )
+                )
+
             self.source_data = new
             return True
 

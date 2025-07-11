@@ -1,9 +1,3 @@
-statsd:
-  enabled: no
-  host: localhost
-  tags:
-    environment_type: env://SOVEREIGN_ENVIRONMENT_TYPE
-
 modifiers:
     - sovereign_3rd_party_test
 
@@ -159,7 +153,9 @@ eds_priority_matrix:
 statsd:
   host: statsd
   port: 8125
-  tags: {}
   namespace: sovereign
-  enabled: false
+  enabled: true
   use_ms: true
+  tags:
+    environment_type: env://SOVEREIGN_ENVIRONMENT_TYPE
+

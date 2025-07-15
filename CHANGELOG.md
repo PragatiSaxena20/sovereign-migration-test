@@ -1,8 +1,8 @@
 Changelog
 =========
 
-1.0.0b101 25-06-2025
---------------------
+1.0.0 TBA
+---------
 
 We have tried to identify and label areas where APIs have been broken,
 however due to the volume of change, some unexpected functionality may break.
@@ -27,7 +27,7 @@ enormous performance benefit.
 
 * **BREAKING**: Removed `/admin` endpoints
 * Fixed a bug that caused `/deepcheck` to not return 500 on errors
-* Integrated `/healthcheck` with worker health.
+* Integrated `/deepcheck` with worker health.
 
 ### Worker
 
@@ -105,6 +105,10 @@ enormous performance benefit.
   to a separate page.
 * Large JSON will be chunked to prevent the browser from lagging or crashing.
 
+0.32.3 11-07-2025
+-----------------
+
+* fix: latest `datadog` version introduced new kwargs that broke internal statsd wrapper
 
 0.32.2 23-06-2025
 -----------------

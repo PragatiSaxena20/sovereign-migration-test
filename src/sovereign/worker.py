@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Optional
 from multiprocessing import Process, cpu_count
 from contextlib import asynccontextmanager
@@ -60,9 +61,26 @@ if config.sources is not None:
     context_middleware.append(poller.add_to_context)
 
 
+def _render_process_entry(job: rendering.RenderJob):  # runs in child
+    """Entry point for render subprocess; increase niceness so it is lower priority.
+
+    We deliberately raise the niceness (positive value) so these CPU bound template
+    renders cannot starve the worker's main event loop handling incoming requests.
+    """
+    try:
+        try:
+            # Always lower scheduling priority by adding +2 niceness relative to parent
+            os.nice(2)  # best-effort; ignored if insufficient privileges
+        except Exception:
+            pass
+        rendering.generate(job)
+    except Exception:
+        log.exception("Render process failed for %s", job.id)
+
+
 def render(job: rendering.RenderJob):
-    log.debug(f"Spawning render process for {job.id}")
-    process = Process(target=rendering.generate, args=[job])
+    log.debug(f"Spawning render process for {job.id} with lowered priority")
+    process = Process(target=_render_process_entry, args=(job,), daemon=True)
     process.start()
     return process
 

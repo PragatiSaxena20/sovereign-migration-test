@@ -7,6 +7,9 @@ export IMAGE_TAG
 COMPOSE_BAKE := true
 export COMPOSE_BAKE
 
+BITBUCKET_CLONE_DIR ?= .
+export BITBUCKET_CLONE_DIR
+
 clean:
 	docker compose kill
 	docker compose down
@@ -49,13 +52,13 @@ install-deps:
 	poetry install -E ujson -E orjson -E caching -E httptools
 	poetry config cache-dir "~/.cache/pip"
 
-bulma:
-	# compile the css sheets
-	docker run -it -w /proj -v .:/proj node:trixie-slim bash ci/sass.sh
-
-release: check_version bulma
-	poetry build
-	poetry publish -u $(TWINE_USERNAME) -p $(TWINE_PASSWORD)
+release: check_version
+	docker compose run \
+		--rm \
+		-it \
+		--entrypoint bash \
+		sovereign \
+		-c "poetry build && poetry publish -u $(TWINE_USERNAME) -p $(TWINE_PASSWORD)"
 
 test-envoy-version:
 	mkdir -p logs

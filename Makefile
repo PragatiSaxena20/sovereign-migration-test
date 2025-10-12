@@ -7,6 +7,9 @@ export IMAGE_TAG
 COMPOSE_BAKE := true
 export COMPOSE_BAKE
 
+BITBUCKET_CLONE_DIR ?= .
+export BITBUCKET_CLONE_DIR
+
 clean:
 	docker compose kill
 	docker compose down
@@ -51,7 +54,7 @@ install-deps:
 
 bulma:
 	# compile the css sheets
-	docker run -it -w /proj -v .:/proj node:trixie-slim bash ci/sass.sh
+	docker run -w /proj -v $(BITBUCKET_CLONE_DIR):/proj node:trixie-slim bash ci/sass.sh
 
 release: check_version bulma
 	poetry build

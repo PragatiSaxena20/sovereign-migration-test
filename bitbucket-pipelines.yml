@@ -124,7 +124,6 @@ pipelines:
             - *set_environment
             - *set_buildkit_false
             - *install_poetry
-            - make install-deps
             - make release
     '*.*.*rc*': &prerelease
       - step:
@@ -135,7 +134,6 @@ pipelines:
             - *set_environment
             - *set_buildkit_false
             - *install_poetry
-            - make install-deps
             - poetry run python scripts/release_check.py
             - make release
     '*.*.*a*': *prerelease

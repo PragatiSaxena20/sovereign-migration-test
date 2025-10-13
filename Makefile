@@ -54,11 +54,11 @@ install-deps:
 
 release: check_version
 	docker compose run \
-		--rm \
-		-it \
 		--entrypoint bash \
+		-e TWINE_USERNAME \
+		-e TWINE_PASSWORD \
 		sovereign \
-		-c "poetry build && poetry publish -u $(TWINE_USERNAME) -p $(TWINE_PASSWORD)"
+		-c 'poetry build && poetry publish --username ${TWINE_USERNAME} --password ${TWINE_PASSWORD}'
 
 test-envoy-version:
 	mkdir -p logs

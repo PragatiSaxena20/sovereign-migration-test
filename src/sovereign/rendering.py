@@ -6,9 +6,10 @@ Functions used to render and return discovery responses to Envoy proxies.
 
 The templates are configurable. `todo See ref:Configuration#Templates`
 """
-
+import traceback
 from concurrent.futures import ThreadPoolExecutor
-from multiprocessing import Process, cpu_count
+from multiprocessing import Pipe, Process, cpu_count
+from multiprocessing.connection import Connection
 from typing import Any, Dict, List
 
 import yaml
@@ -58,20 +59,38 @@ class RenderJob(pydantic.BaseModel):
     request: DiscoveryRequest
     context: dict[str, Any]
 
-    def submit(self):
+    def spawn(self):
+        print("RenderJob.spawn")
+        print(f"POOL debug info:")
+        print(f"  - Type: {type(POOL)}")
+        print(f"  - Max workers: {POOL._max_workers}")
+        print(f"  - Threads: {POOL._threads}")
+        print(f"  - Shutdown: {POOL._shutdown}")
+        print(f"  - Work queue size: {POOL._work_queue.qsize()}")
+        print(f"  - Broken: {getattr(POOL, '_broken', 'N/A')}")
+        print(f"  - Thread name prefix: {getattr(POOL, '_thread_name_prefix', 'N/A')}")
         _ = POOL.submit(self._run)
 
     def _run(self):
-        proc = Process(target=generate, args=[self])
+        print("RenderJob._run")
+        rx: Connection
+        tx: Connection
+        rx, tx = Pipe()
+        proc = Process(target=generate, args=[self, tx])
         proc.start()
         proc.join()
+        while rx.poll(timeout=1):
+            print(rx.recv())
 
 
-def generate(job: RenderJob) -> None:
+def generate(job: RenderJob, tx) -> None:
+    tx.send("rendering.py/generate")
     request = job.request
     tags = [f"type:{request.resource_type}"]
     try:
+        tx.send("rendering.py/generate 4")
         with stats.timed("template.render_ms", tags=tags):
+            tx.send("rendering.py/generate 1")
             content = request.template(
                 discovery_request=request,
                 host_header=request.desired_controlplane,
@@ -85,6 +104,7 @@ def generate(job: RenderJob) -> None:
             resources = filter_resources(content["resources"], request.resources)
             add_type_urls(request.api_version, request.resource_type, resources)
             response = ProcessedTemplate(resources=resources)
+            tx.send("rendering.py/generate 2")
             cache.write(
                 job.id,
                 cache.Entry(
@@ -95,13 +115,17 @@ def generate(job: RenderJob) -> None:
                 ),
             )
         tags.append("result:ok")
+        tx.send("rendering.py/generate 3")
     except Exception as e:
+        tx.send(str(e))
+        tx.send(traceback.format_exc())
         tags.append("result:err")
         tags.append(f"error:{e.__class__.__name__.lower()}")
         if SENTRY_INSTALLED and config.sentry_dsn:
             sentry_sdk.capture_exception(e)
     finally:
         stats.increment("template.render", tags=tags)
+        tx.close()
 
 
 def deserialize_config(content: str) -> Dict[str, Any]:

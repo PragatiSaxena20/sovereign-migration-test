@@ -10,7 +10,7 @@ The templates are configurable. `todo See ref:Configuration#Templates`
 import traceback
 import importlib
 from concurrent.futures import ThreadPoolExecutor
-from multiprocessing import Process, Pipe, cpu_count
+from multiprocessing import Process, Pipe
 from multiprocessing.connection import Connection
 from typing import Any
 
@@ -21,13 +21,14 @@ from yaml.parser import ParserError, ScannerError  # type: ignore
 
 from sovereign import logs, cache, stats, application_logger as log
 from sovereign.cache.types import Entry
-from sovereign.configuration import config
+from sovereign.configuration import config, SovereignAsgiConfig
 from sovereign.types import DiscoveryRequest, ProcessedTemplate
 
 
 writer = cache.CacheWriter()
-# limit render jobs to number of cores
-POOL = ThreadPoolExecutor(max_workers=cpu_count())
+# Use configured thread limit instead of cpu_count()
+asgi_config = SovereignAsgiConfig()
+POOL = ThreadPoolExecutor(max_workers=asgi_config.threads)
 
 type_urls = {
     "v2": {
@@ -71,8 +72,23 @@ class RenderJob(pydantic.BaseModel):
                 f"queue_size={POOL._work_queue.qsize()}"
             )
         )
-        proc.join(timeout=30)  # TODO: render timeout configurable
-        while rx.poll(timeout=30):
+        # Use configured worker timeout instead of hardcoded 30 seconds
+        timeout = asgi_config.worker_timeout
+        proc.join(timeout=timeout)
+        if proc.is_alive():
+            log.warning(
+                f"Process {proc.pid} for job {self.id} exceeded timeout {timeout}s, terminating"
+            )
+            proc.terminate()
+            proc.join(timeout=5)  # Give it time to terminate gracefully
+            if proc.is_alive():
+                log.warning(
+                    f"Process {proc.pid} did not terminate gracefully, force killing"
+                )
+                proc.kill()
+                proc.join(timeout=1)
+        # Poll for remaining messages with shorter timeout
+        while rx.poll(timeout=1):
             level, message = rx.recv()
             logger = getattr(log, level)
             logger(message)

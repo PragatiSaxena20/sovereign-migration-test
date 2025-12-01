@@ -12,6 +12,11 @@ import urllib3
 from starlette.testclient import TestClient
 from starlette_context import context, request_cycle_context
 
+# Start S3 mocking at module level BEFORE any sovereign imports
+# This prevents S3 connection errors during import of modules that initialize cache
+_s3_mock = mock_s3()
+_s3_mock.start()
+
 from sovereign.configuration import config
 from sovereign.utils.mock import mock_discovery_request
 

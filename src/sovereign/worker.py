@@ -13,18 +13,24 @@ from sovereign import (
     stats,
 )
 from sovereign.context import TemplateContext
+from sovereign.render_pool import RenderJobManager, RenderJob
 from sovereign.sources import SourcePoller
 from sovereign.configuration import config
 from sovereign.types import RegisterClientRequest, DiscoveryRequest
 from sovereign.events import bus, Topic
 
 
+# noinspection PyUnusedLocal
 def hidden_field(*args, **kwargs):
     return "(value hidden)"
 
 
+def shown_field(value):
+    return value
+
+
 def inject_builtin_items(request, output):
-    output["__hide_from_ui"] = lambda v: v
+    output["__hide_from_ui"] = shown_field
     output["crypto"] = server_cipher_container
     if request.is_internal_request:
         output["__hide_from_ui"] = hidden_field
@@ -77,7 +83,7 @@ class RenderQueue:
 
 
 ONDEMAND = RenderQueue()
-
+RENDER_JOB_MANAGER = RenderJobManager()
 
 poller = None
 if config.sources is not None:
@@ -117,12 +123,12 @@ async def render_on_event(ctx):
                 for client, request in registered:
                     if context_name in request.template.depends_on:
                         log.debug(f"Rendering template for {request}")
-                        job = rendering.RenderJob(
+                        job = RenderJob(
                             id=client,
                             request=request,
                             context=ctx.get_context(request),
                         )
-                        job.submit()
+                        RENDER_JOB_MANAGER.submit(job, rendering.generate)
 
         finally:
             await asyncio.sleep(config.template_context.cooldown)
@@ -130,15 +136,14 @@ async def render_on_event(ctx):
 
 async def render_on_demand(ctx):
     while True:
+        # noinspection PyShadowingBuiltins
         id, request = await ONDEMAND.get()
         stats.increment("template.render_on_demand")
         log.debug(
             f"Received on-demand request to render templates for {id} ({request})"
         )
-        job = rendering.RenderJob(
-            id=id, request=request, context=ctx.get_context(request)
-        )
-        job.submit()
+        job = RenderJob(id=id, request=request, context=ctx.get_context(request))
+        RENDER_JOB_MANAGER.submit(job, rendering.generate)
         ONDEMAND.task_done()
 
 
@@ -146,6 +151,7 @@ async def monitor_render_queue():
     """Periodically report render queue size metrics"""
     while True:
         await asyncio.sleep(10)
+        # noinspection PyProtectedMember
         stats.gauge("template.on_demand_queue_size", ONDEMAND._queue.qsize())
 
 
@@ -174,11 +180,18 @@ async def lifespan(_: FastAPI):
     log.debug("Worker lifespan initialized")
     yield
 
+    # Cleanup
+    log.debug("Shutting down render job manager")
+    RENDER_JOB_MANAGER.shutdown()
+
 
 worker = FastAPI(lifespan=lifespan)
 if dsn := config.sentry_dsn.get_secret_value():
     try:
+        # noinspection PyUnusedImports
         import sentry_sdk
+
+        # noinspection PyUnusedImports
         from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
 
         sentry_sdk.init(dsn)
@@ -203,6 +216,7 @@ async def client_add(
         stats.increment("client.registration", tags=["status:exists"])
         return "Registered", 200
     else:
+        # noinspection PyShadowingBuiltins
         id, req = writer.register(xds)
         log.debug(f"Creating on-demand render job for new client {xds}, {id=}")
         try:

@@ -82,8 +82,8 @@ class RenderQueue:
         self._queue.task_done()
 
 
-ONDEMAND = RenderQueue()
-RENDER_JOB_MANAGER = RenderJobManager()
+RENDER_ONDEMAND_QUEUE = RenderQueue()
+RENDER_BACKGROUND_JOB_MANAGER = RenderJobManager()
 
 poller = None
 if config.sources is not None:
@@ -128,7 +128,7 @@ async def render_on_event(ctx):
                             request=request,
                             context=ctx.get_context(request),
                         )
-                        RENDER_JOB_MANAGER.submit(job, rendering.generate)
+                        RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
 
         finally:
             await asyncio.sleep(config.template_context.cooldown)
@@ -137,14 +137,14 @@ async def render_on_event(ctx):
 async def render_on_demand(ctx):
     while True:
         # noinspection PyShadowingBuiltins
-        id, request = await ONDEMAND.get()
+        id, request = await RENDER_ONDEMAND_QUEUE.get()
         stats.increment("template.render_on_demand")
         log.debug(
             f"Received on-demand request to render templates for {id} ({request})"
         )
         job = RenderJob(id=id, request=request, context=ctx.get_context(request))
-        RENDER_JOB_MANAGER.submit(job, rendering.generate)
-        ONDEMAND.task_done()
+        RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
+        RENDER_ONDEMAND_QUEUE.task_done()
 
 
 async def monitor_render_queue():
@@ -152,7 +152,9 @@ async def monitor_render_queue():
     while True:
         await asyncio.sleep(10)
         # noinspection PyProtectedMember
-        stats.gauge("template.on_demand_queue_size", ONDEMAND._queue.qsize())
+        stats.gauge(
+            "template.on_demand_queue_size", RENDER_ONDEMAND_QUEUE._queue.qsize()
+        )
 
 
 @asynccontextmanager
@@ -182,7 +184,7 @@ async def lifespan(_: FastAPI):
 
     # Cleanup
     log.debug("Shutting down render job manager")
-    RENDER_JOB_MANAGER.shutdown()
+    RENDER_BACKGROUND_JOB_MANAGER.shutdown()
 
 
 worker = FastAPI(lifespan=lifespan)
@@ -220,7 +222,7 @@ async def client_add(
         id, req = writer.register(xds)
         log.debug(f"Creating on-demand render job for new client {xds}, {id=}")
         try:
-            ONDEMAND.put_nowait((id, req))
+            RENDER_ONDEMAND_QUEUE.put_nowait((id, req))
         except asyncio.QueueFull:
             stats.increment("client.registration", tags=["status:queue_full"])
             return "Slow down :(", 429

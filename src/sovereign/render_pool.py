@@ -12,18 +12,59 @@ import os
 import threading
 import traceback
 from concurrent.futures.process import ProcessPoolExecutor
-from functools import partial
 from multiprocessing import Pipe, cpu_count
 
 # noinspection PyProtectedMember
 from multiprocessing.connection import Connection
 from types import ModuleType
-from typing import Any
+from typing import Any, Callable
 
+import betterproto
 import pydantic
+from betterproto import Casing
 
 from sovereign import stats, application_logger as log
 from sovereign.types import DiscoveryRequest
+
+
+class _SerialisedMessage:
+    # noinspection PyTypeChecker
+    def __init__(self, message: betterproto.Message):
+        self.data = message.to_dict(casing=Casing.SNAKE, include_default_values=True)
+        self.message_class = type(message)
+
+    def deserialise(self) -> betterproto.Message:
+        return self.message_class().from_dict(self.data)
+
+
+def _make_pickleable(obj: Any) -> Any:
+    if isinstance(obj, betterproto.Message):
+        return _SerialisedMessage(obj)
+    elif isinstance(obj, dict):
+        return {k: _make_pickleable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_make_pickleable(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_make_pickleable(item) for item in obj)
+    elif isinstance(obj, set):
+        return {_make_pickleable(item) for item in obj}
+    else:
+        return obj
+
+
+def _restore_from_pickleable(obj: Any) -> Any:
+    if isinstance(obj, _SerialisedMessage):
+        return obj.deserialise()
+    elif isinstance(obj, dict):
+        return {k: _restore_from_pickleable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_restore_from_pickleable(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_restore_from_pickleable(item) for item in obj)
+    elif isinstance(obj, set):
+        return {_restore_from_pickleable(item) for item in obj}
+    else:
+        return obj
 
 
 class RenderJob(pydantic.BaseModel):
@@ -45,6 +86,7 @@ class RenderJobManager:
 
         self.log_listener_thread = threading.Thread(
             target=_forward_worker_logs_to_application_logger,
+            args=[self.log_rx],
             daemon=True,
             name="LogListenerThread",
         )
@@ -84,7 +126,9 @@ class RenderJobManager:
 
             self._metrics_stop_event.wait(timeout=10.0)
 
-    def submit(self, job: RenderJob, generate_func):
+    def submit(
+        self, job: RenderJob, generate_func: Callable[[RenderJob, Connection], None]
+    ):
         log.debug(
             f"[RenderJobManager] Submitting render job {job.id} for resource type: {job.request.resource_type}"
         )
@@ -99,7 +143,8 @@ class RenderJobManager:
             if isinstance(v, ModuleType):  # check if it's a module
                 modules[k] = v.__name__
             else:
-                pickleable_job_context[k] = v
+                # Convert betterproto Message objects to dicts to survive pickling
+                pickleable_job_context[k] = _make_pickleable(v)
 
         pickleable_job = RenderJob(
             id=job.id,
@@ -108,9 +153,7 @@ class RenderJobManager:
             modules=modules,
         )
 
-        future = self.executor.submit(
-            generate_func, pickleable_job, partial(_worker_log, self.log_tx)
-        )
+        future = self.executor.submit(generate_func, pickleable_job, self.log_tx)
 
         def log_result(fut):
             try:
@@ -138,6 +181,8 @@ class RenderJobManager:
 def _forward_worker_logs_to_application_logger(log_rx: Connection):
     while True:
         try:
+            print(f"Running from: {os.path.abspath(__file__)}")
+            log.info("Polling worker log pipe")
             if log_rx.poll(timeout=1.0):
                 msg = log_rx.recv()
                 level = msg.get("level", "INFO")

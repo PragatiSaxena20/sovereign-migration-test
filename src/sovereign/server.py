@@ -1,3 +1,4 @@
+import os
 import warnings
 import tempfile
 import configparser
@@ -16,16 +17,28 @@ def web() -> None:
     from sovereign.app import app
 
     log.debug("Starting web server")
-    uvicorn.run(
-        app,
-        fd=0,
-        log_level=asgi_config.log_level,
-        access_log=False,
-        timeout_keep_alive=asgi_config.keepalive,
-        host=asgi_config.host,
-        port=asgi_config.port,
-        workers=1,  # per managed supervisor proc
-    )
+
+    if os.getenv("SUPERVISOR_ENABLED"):
+        uvicorn.run(
+            app,
+            fd=0,
+            log_level=asgi_config.log_level,
+            access_log=False,
+            timeout_keep_alive=asgi_config.keepalive,
+            host=asgi_config.host,
+            port=asgi_config.port,
+            workers=1,  # per managed supervisor proc
+        )
+    else:
+        uvicorn.run(
+            app,
+            log_level=asgi_config.log_level,
+            access_log=False,
+            timeout_keep_alive=asgi_config.keepalive,
+            host=asgi_config.host,
+            port=asgi_config.port,
+            workers=1,  # per managed supervisor proc
+        )
 
 
 def worker():

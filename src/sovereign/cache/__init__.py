@@ -61,7 +61,8 @@ class CacheReader(CacheManagerBase):
         id = client_id(req)
         if result := self.try_read(id):
             if result.from_remote:
-                _ = self.register_over_http(req)
+                # Re-register client so worker knows about it (ignore result)
+                _, _ = self.register_over_http(req)
             return result.value
         return None
 
@@ -79,18 +80,15 @@ class CacheReader(CacheManagerBase):
         attempt = 1
         while (asyncio.get_event_loop().time() - start) < timeout_s:
             if not registered:
-                try:
-                    if self.register_over_http(req):
-                        stats.increment(metric, tags=["status:registered"])
-                        registered = True
-                        log.debug("Client registered")
-                    else:
-                        stats.increment(metric, tags=["status:ratelimited"])
-                        await asyncio.sleep(min(attempt, CACHE_READ_TIMEOUT))
-                        attempt *= 2
-                except Exception as e:
-                    stats.increment(metric, tags=["status:failed"])
-                    log.exception(f"Tried to register client but failed: {e}")
+                success, status = self.register_over_http(req)
+                stats.increment(metric, tags=[f"status:{status}"])
+                if success:
+                    registered = True
+                    log.debug("Client registered")
+                else:
+                    log.debug(f"Registration failed with status: {status}")
+                    await asyncio.sleep(min(attempt, CACHE_READ_TIMEOUT))
+                    attempt *= 2
             if entry := self.get(req):
                 log.debug("Entry has been populated")
                 return entry
@@ -98,7 +96,19 @@ class CacheReader(CacheManagerBase):
 
         return None
 
-    def register_over_http(self, req: DiscoveryRequest) -> bool:
+    def register_over_http(self, req: DiscoveryRequest) -> tuple[bool, str]:
+        """
+        Attempt to register a client with the worker.
+
+        Returns:
+            tuple[bool, str]: (success, status) where status is one of:
+                - "registered": Successfully registered (200/202)
+                - "ratelimited": Queue full (429)
+                - "http_error_XXX": Other HTTP error codes
+                - "timeout": Request timed out
+                - "connection_error": Could not connect to worker
+                - "request_error": Other request errors
+        """
         registration = RegisterClientRequest(request=req)
         log.debug(f"Sending registration to worker for {req}")
         try:
@@ -110,12 +120,22 @@ class CacheReader(CacheManagerBase):
             match response.status_code:
                 case 200 | 202:
                     log.debug("Worker responded OK to registration")
-                    return True
+                    return True, "registered"
+                case 429:
+                    log.debug("Worker responded with 429 (queue full)")
+                    return False, "ratelimited"
                 case code:
                     log.debug(f"Worker responded with {code} to registration")
+                    return False, f"http_error_{code}"
+        except requests.Timeout:
+            log.warning("Timeout while registering client")
+            return False, "timeout"
+        except requests.ConnectionError as e:
+            log.warning(f"Connection error while registering client: {e}")
+            return False, "connection_error"
         except Exception as e:
             log.exception(f"Error while registering client: {e}")
-        return False
+            return False, "request_error"
 
 
 @final

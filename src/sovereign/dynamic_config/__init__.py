@@ -46,6 +46,7 @@ class Loadable(BaseModel):
         deserializer = DESERIALIZERS[ser]
 
         try:
+            print(f"Loading {self.protocol}+{self.path}")
             data = loader.load(self.path)
             return deserializer.deserialize(data)
         except Exception as original_error:

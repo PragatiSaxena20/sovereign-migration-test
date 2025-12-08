@@ -9,7 +9,10 @@ from sovereign import application_logger as log
 from sovereign.cache.backends import CacheBackend
 
 try:
+    # noinspection PyUnusedImports
     import boto3
+
+    # noinspection PyUnusedImports
     from botocore.exceptions import ClientError
 except ImportError:
     pass
@@ -66,6 +69,7 @@ class S3Client:
 class S3Backend(CacheBackend):
     """S3 cache backend implementation"""
 
+    # noinspection PyMissingConstructor,PyProtocol
     @override
     def __init__(self, config: dict[str, Any]) -> None:  # pyright: ignore[reportMissingSuperCall]
         """Initialize S3 backend

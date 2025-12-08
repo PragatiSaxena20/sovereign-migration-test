@@ -17,6 +17,7 @@ from sovereign.statistics import configure_statsd
 from sovereign.utils.timer import wait_until
 from sovereign.dynamic_config import Loadable
 from sovereign.events import bus, Event, Topic
+from sovereign import application_logger as log
 
 
 stats = configure_statsd()
@@ -120,6 +121,7 @@ class TemplateContext:
             next_ = heapq.heappop(self.scheduled)
             task = next_.task
             # Wait for due date
+            # noinspection PyTypeChecker
             delay = max(0, next_.due - time.monotonic())
             await asyncio.sleep(delay)
             # reschedule immediately (at next due date)
@@ -186,6 +188,7 @@ class ContextTask(pydantic.BaseModel):
                 break
             except Exception as e:
                 data = str(e)
+                log.error(f"Could not load context {self.name}: {e}")
                 state = ContextStatus.FAILED
                 stats.increment("context.refresh.error", tags=[f"context:{self.name}"])
             attempts_remaining -= 1

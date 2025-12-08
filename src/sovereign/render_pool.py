@@ -8,7 +8,9 @@ Manages the process pool for CPU-bound rendering tasks, including:
 - Log message forwarding from worker processes
 """
 
+import faulthandler
 import os
+import sys
 import threading
 import traceback
 from concurrent.futures.process import ProcessPoolExecutor
@@ -30,11 +32,20 @@ from sovereign.types import DiscoveryRequest
 class _SerialisedMessage:
     # noinspection PyTypeChecker
     def __init__(self, message: betterproto.Message):
-        self.data = message.to_dict(casing=Casing.SNAKE, include_default_values=True)
-        self.message_class = type(message)
+        # Don't include default values or our deserialisation is likely to select the wrong field to populate in case
+        # of 'oneof' fields
+        self.data = message.to_dict(casing=Casing.SNAKE, include_default_values=False)
+        self.module_name = type(message).__module__
+        self.class_name = type(message).__qualname__
 
     def deserialise(self) -> betterproto.Message:
-        return self.message_class().from_dict(self.data)
+        import importlib
+        module = importlib.import_module(self.module_name)
+        cls = module
+        for part in self.class_name.split('.'):
+            cls = getattr(cls, part)
+        # noinspection PyCallingNonCallable
+        return cls().from_dict(self.data)
 
 
 def _make_pickleable(obj: Any) -> Any:
@@ -67,6 +78,28 @@ def _restore_from_pickleable(obj: Any) -> Any:
         return obj
 
 
+def _worker_initialiser(log_tx: Connection):
+    faulthandler.enable()
+    original_excepthook = sys.excepthook
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        try:
+            tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            log_tx.send(
+                {
+                    "level": "ERROR",
+                    "message": f"Worker process terminating with uncaught exception: {tb_str}",
+                    "pid": os.getpid(),
+                }
+            )
+        except Exception:
+            pass
+
+        original_excepthook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _excepthook
+
+
 class RenderJob(pydantic.BaseModel):
     id: str
     request: DiscoveryRequest
@@ -77,6 +110,7 @@ class RenderJob(pydantic.BaseModel):
 class RenderJobManager:
     log_rx: Connection
     log_tx: Connection
+    _stop_event: threading.Event
 
     def __init__(self):
         # Start two threads:
@@ -84,15 +118,17 @@ class RenderJobManager:
         # - send metrics every 10 seconds on state of process pool
         self.log_rx, self.log_tx = Pipe(duplex=False)
 
+        # Used to signal threads to stop
+        self._stop_event = threading.Event()
+
         self.log_listener_thread = threading.Thread(
             target=_forward_worker_logs_to_application_logger,
-            args=[self.log_rx],
+            args=[self.log_rx, self._stop_event],
             daemon=True,
             name="LogListenerThread",
         )
         self.log_listener_thread.start()
 
-        self._metrics_stop_event = threading.Event()
         self.metrics_thread = threading.Thread(
             target=self._send_metrics,
             daemon=True,
@@ -108,10 +144,14 @@ class RenderJobManager:
             f"[RenderJobManager] {self.num_workers} workers (total cores: {cpu_count()})"
         )
 
-        self.executor = ProcessPoolExecutor(max_workers=self.num_workers)
+        self.executor = ProcessPoolExecutor(
+            max_workers=self.num_workers,
+            initializer=_worker_initialiser,
+            initargs=(self.log_tx,),
+        )
 
     def _send_metrics(self):
-        while not self._metrics_stop_event.is_set():
+        while not self._stop_event.is_set():
             try:
                 if self.executor is not None:
                     stats.gauge(
@@ -124,7 +164,7 @@ class RenderJobManager:
             except Exception:
                 pass
 
-            self._metrics_stop_event.wait(timeout=10.0)
+            self._stop_event.wait(timeout=10.0)
 
     def submit(
         self, job: RenderJob, generate_func: Callable[[RenderJob, Connection], None]
@@ -168,7 +208,7 @@ class RenderJobManager:
         log.debug(f"[RenderJobManager] Render job {job.id} submitted to executor")
 
     def shutdown(self):
-        self._metrics_stop_event.set()
+        self._stop_event.set()
         self.metrics_thread.join(timeout=5.0)
 
         self.executor.shutdown(wait=True)
@@ -178,11 +218,11 @@ class RenderJobManager:
         self.log_rx.close()
 
 
-def _forward_worker_logs_to_application_logger(log_rx: Connection):
-    while True:
+def _forward_worker_logs_to_application_logger(
+    log_rx: Connection, stop_event: threading.Event
+):
+    while not stop_event.is_set():
         try:
-            print(f"Running from: {os.path.abspath(__file__)}")
-            log.info("Polling worker log pipe")
             if log_rx.poll(timeout=1.0):
                 msg = log_rx.recv()
                 level = msg.get("level", "INFO")

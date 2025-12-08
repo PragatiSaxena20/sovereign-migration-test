@@ -104,6 +104,31 @@ class Status(BaseModel):
     details: list[Any]
 
 
+class TemplateMissingArgsError(TypeError):
+    """Raised when a template is rendered with missing required arguments."""
+
+    def __init__(
+        self,
+        missing_args: str,
+        supplied_args: tuple[Any, ...],
+        supplied_kwargs: list[str],
+    ):
+        self.missing_args = missing_args
+        self.supplied_args = supplied_args
+        self.supplied_kwargs = supplied_kwargs
+        super().__init__(
+            f"Tried to render a template using partial arguments. "
+            f"Missing args: {missing_args}. Supplied args: {supplied_args} "
+            f"Supplied keyword args: {supplied_kwargs}"
+        )
+
+    def __reduce__(self):
+        return (
+            self.__class__,
+            (self.missing_args, self.supplied_args, self.supplied_kwargs),
+        )
+
+
 class XdsTemplate(BaseModel):
     path: str | Loadable
     resource_type: str
@@ -138,11 +163,11 @@ class XdsTemplate(BaseModel):
                     raise e
                 message_start = str(e).find(":")
                 missing_args = str(e)[message_start + 2 :]
-                supplied_args = list(kwargs.keys())
-                raise TypeError(
-                    f"Tried to render a template using partial arguments. "
-                    f"Missing args: {missing_args}. Supplied args: {args} "
-                    f"Supplied keyword args: {supplied_args}"
+                supplied_kwargs = list(kwargs.keys())
+                raise TemplateMissingArgsError(
+                    missing_args=missing_args,
+                    supplied_args=args,
+                    supplied_kwargs=supplied_kwargs,
                 )
         else:
             return self.code.render(*args, **kwargs)
@@ -234,6 +259,7 @@ class DiscoveryRequest(BaseModel):
     def resources(self) -> Resources:
         return Resources(self.resource_names)
 
+    # noinspection PyShadowingBuiltins
     def cache_key(self, rules: list[str]) -> str:
         map = self.model_dump()
         hash = hashlib.sha256()

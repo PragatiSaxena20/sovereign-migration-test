@@ -129,7 +129,6 @@ async def render_on_event(ctx):
                             context=ctx.get_context(request),
                         )
                         RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
-
         finally:
             await asyncio.sleep(config.template_context.cooldown)
 

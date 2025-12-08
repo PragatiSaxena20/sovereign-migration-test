@@ -6,6 +6,7 @@ to configure their own remote cache backends through entry points.
 """
 
 import asyncio
+import os
 from typing import Any
 from typing_extensions import final
 
@@ -54,9 +55,11 @@ class CacheReader(CacheManagerBase):
                 log.warning(f"Failed to read from remote cache: {e}")
                 stats.increment("cache.remote.error")
             stats.increment("cache.remote.miss")
-            log.warning(f"Failed to read from either cache for {key}")
+            log.debug(f"Failed to read from either cache for {key}")
         return None
 
+
+    # noinspection PyShadowingBuiltins
     def get(self, req: DiscoveryRequest) -> Entry | None:
         id = client_id(req)
         if result := self.try_read(id):
@@ -98,7 +101,8 @@ class CacheReader(CacheManagerBase):
 
         return None
 
-    def register_over_http(self, req: DiscoveryRequest) -> bool:
+    @staticmethod
+    def register_over_http(req: DiscoveryRequest) -> bool:
         registration = RegisterClientRequest(request=req)
         log.debug(f"Sending registration to worker for {req}")
         try:
@@ -125,6 +129,10 @@ class CacheWriter(CacheManagerBase):
     ) -> tuple[bool, list[tuple[str, str]]]:
         msg = []
         cached = False
+
+        if os.getenv("CACHE_DISABLED") == "true":
+            return cached, msg
+
         try:
             self.local.set(key, value, timeout)
             stats.increment("cache.fs.write.success")
@@ -144,12 +152,16 @@ class CacheWriter(CacheManagerBase):
                 stats.increment("cache.remote.write.error")
         return cached, msg
 
+
+    # noinspection PyShadowingBuiltins
     def register(self, req: DiscoveryRequest):
         id = client_id(req)
         log.debug(f"Registering client {id}")
         self.local.register(id, req)
         return id, req
 
+
+    # noinspection PyShadowingBuiltins
     def registered(self, req: DiscoveryRequest) -> bool:
         ret = False
         id = client_id(req)

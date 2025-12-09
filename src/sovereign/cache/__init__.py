@@ -73,38 +73,56 @@ class CacheReader(CacheManagerBase):
         self, req: DiscoveryRequest, timeout_s=CACHE_READ_TIMEOUT, poll_interval_s=0.5
     ) -> Entry | None:
         metric = "client.registration"
+        cache_key = client_id(req)
+        log.info(f"[blocking_read] Starting blocking read for {cache_key}, resource_type={req.resource_type}, timeout={timeout_s}s")
+
         if entry := self.get(req):
+            log.info(f"[blocking_read] Cache hit on first check for {cache_key}")
             return entry
 
-        log.debug("Cache entry not found, registering client and waiting for entry")
+        log.info(f"[blocking_read] Cache miss for {cache_key}, registering client and waiting for entry")
         registered = False
         start = asyncio.get_event_loop().time()
         attempt = 1
+        poll_count = 0
         while (asyncio.get_event_loop().time() - start) < timeout_s:
+            elapsed = asyncio.get_event_loop().time() - start
             if not registered:
                 try:
+                    log.debug(f"[blocking_read] Attempting registration for {cache_key} (attempt {attempt}, elapsed {elapsed:.2f}s)")
                     if self.register_over_http(req):
                         stats.increment(metric, tags=["status:registered"])
                         registered = True
-                        log.debug("Client registered")
+                        log.info(f"[blocking_read] Client {cache_key} registered successfully after {elapsed:.2f}s")
                     else:
                         stats.increment(metric, tags=["status:ratelimited"])
-                        await asyncio.sleep(min(attempt, CACHE_READ_TIMEOUT))
+                        wait_time = min(attempt, CACHE_READ_TIMEOUT)
+                        log.debug(f"[blocking_read] Registration rate limited for {cache_key}, waiting {wait_time}s")
+                        await asyncio.sleep(wait_time)
                         attempt *= 2
                 except Exception as e:
                     stats.increment(metric, tags=["status:failed"])
-                    log.exception(f"Tried to register client but failed: {e}")
+                    log.exception(f"[blocking_read] Registration failed for {cache_key}: {e}")
+
+            poll_count += 1
             if entry := self.get(req):
-                log.debug("Entry has been populated")
+                log.info(f"[blocking_read] Entry found for {cache_key} after {poll_count} polls, elapsed {elapsed:.2f}s")
                 return entry
+
+            if poll_count % 10 == 0:
+                log.debug(f"[blocking_read] Still waiting for {cache_key}, poll_count={poll_count}, elapsed={elapsed:.2f}s, registered={registered}")
+
             await asyncio.sleep(poll_interval_s)
 
+        total_elapsed = asyncio.get_event_loop().time() - start
+        log.warning(f"[blocking_read] Timeout waiting for {cache_key} after {total_elapsed:.2f}s, {poll_count} polls, registered={registered}")
         return None
 
     @staticmethod
     def register_over_http(req: DiscoveryRequest) -> bool:
         registration = RegisterClientRequest(request=req)
-        log.debug(f"Sending registration to worker for {req}")
+        cache_key = client_id(req)
+        log.debug(f"[register_over_http] Sending registration to worker for {cache_key}")
         try:
             response = requests.put(
                 f"{WORKER_URL}/client",
@@ -113,12 +131,12 @@ class CacheReader(CacheManagerBase):
             )
             match response.status_code:
                 case 200 | 202:
-                    log.debug("Worker responded OK to registration")
+                    log.debug(f"[register_over_http] Worker responded OK ({response.status_code}) to registration for {cache_key}")
                     return True
                 case code:
-                    log.debug(f"Worker responded with {code} to registration")
+                    log.warning(f"[register_over_http] Worker responded with {code} to registration for {cache_key}")
         except Exception as e:
-            log.exception(f"Error while registering client: {e}")
+            log.exception(f"[register_over_http] Error while registering client {cache_key}: {e}")
         return False
 
 
@@ -130,15 +148,19 @@ class CacheWriter(CacheManagerBase):
         msg = []
         cached = False
 
+        log.debug(f"[CacheWriter.set] Writing cache entry for {key}, version={value.version}, len={value.len}")
+
         if os.getenv("CACHE_DISABLED") == "true":
+            log.debug(f"[CacheWriter.set] Cache disabled, skipping write for {key}")
             return cached, msg
 
         try:
             self.local.set(key, value, timeout)
             stats.increment("cache.fs.write.success")
             cached = True
+            log.debug(f"[CacheWriter.set] Successfully wrote to filesystem cache for {key}")
         except Exception as e:
-            log.warning(f"Failed to write to filesystem cache: {e}")
+            log.warning(f"[CacheWriter.set] Failed to write to filesystem cache for {key}: {e}")
             msg.append(("warning", f"Failed to write to filesystem cache: {e}"))
             stats.increment("cache.fs.write.error")
         if self.remote:
@@ -146,18 +168,22 @@ class CacheWriter(CacheManagerBase):
                 self.remote.set(key, value, timeout)
                 stats.increment("cache.remote.write.success")
                 cached = True
+                log.debug(f"[CacheWriter.set] Successfully wrote to remote cache for {key}")
             except Exception as e:
-                log.warning(f"Failed to write to remote cache: {e}")
+                log.warning(f"[CacheWriter.set] Failed to write to remote cache for {key}: {e}")
                 msg.append(("warning", f"Failed to write to remote cache: {e}"))
                 stats.increment("cache.remote.write.error")
+
+        log.info(f"[CacheWriter.set] Cache write complete for {key}, cached={cached}")
         return cached, msg
 
 
     # noinspection PyShadowingBuiltins
     def register(self, req: DiscoveryRequest):
         id = client_id(req)
-        log.debug(f"Registering client {id}")
+        log.info(f"[CacheWriter.register] Registering client {id}, resource_type={req.resource_type}")
         self.local.register(id, req)
+        log.debug(f"[CacheWriter.register] Client {id} registered in local cache")
         return id, req
 
 

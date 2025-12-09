@@ -86,9 +86,12 @@ class TemplateContext:
             await task.notify()
 
     def get_context(self, req: DiscoveryRequest) -> dict[str, Any]:
+        log.debug(f"[TemplateContext.get_context] Getting context for resource_type={req.resource_type}, available contexts: {list(self.results.keys())}")
         ret = {r.name: r.data for r in self.results.values()}
+        log.debug(f"[TemplateContext.get_context] Base context keys: {list(ret.keys())}, running {len(self.middleware)} middleware")
         for fn in self.middleware:
             fn(req, ret)
+        log.debug(f"[TemplateContext.get_context] Final context keys: {list(ret.keys())}")
         return ret
 
     def get(self, key: str, default: Any = None) -> Any:

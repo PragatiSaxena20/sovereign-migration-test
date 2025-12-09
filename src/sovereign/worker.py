@@ -109,41 +109,69 @@ if config.sources is not None:
 
 async def render_on_event(ctx):
     subscription = bus.subscribe(Topic.CONTEXT)
+    log.info("[render_on_event] Started, waiting for context events")
     while True:
         # block forever until new context arrives
+        log.debug("[render_on_event] Waiting for next context event")
         event = await subscription.get()
         context_name = event.metadata.get("name")
 
+        log.info(f"[render_on_event] Received context event: {context_name}")
         log.debug(event.message)
         try:
             if registered := writer.get_registered_clients():
                 size = len(registered)
+                log.info(f"[render_on_event] Found {size} registered clients to potentially render")
                 stats.increment("template.render_on_event", tags=[f"batch_size:{size}"])
 
+                rendered_count = 0
+                skipped_count = 0
                 for client, request in registered:
                     if context_name in request.template.depends_on:
-                        log.debug(f"Rendering template for {request}")
+                        log.debug(f"[render_on_event] Client {client} depends on {context_name}, rendering template for {request}")
                         job = RenderJob(
                             id=client,
                             request=request,
                             context=ctx.get_context(request),
                         )
                         RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
+                        rendered_count += 1
+                    else:
+                        log.debug(f"[render_on_event] Client {client} does not depend on {context_name}, skipping")
+                        skipped_count += 1
+                log.info(f"[render_on_event] Submitted {rendered_count} render jobs, skipped {skipped_count} clients")
+            else:
+                log.debug("[render_on_event] No registered clients found")
+        except Exception as e:
+            log.error(f"[render_on_event] Error processing context event: {e}", exc_info=True)
         finally:
+            log.debug(f"[render_on_event] Entering cooldown for {config.template_context.cooldown} seconds")
             await asyncio.sleep(config.template_context.cooldown)
 
 
 async def render_on_demand(ctx):
+    log.info("[render_on_demand] Started, waiting for on-demand render requests")
     while True:
         # noinspection PyShadowingBuiltins
+        log.debug("[render_on_demand] Waiting for next request from queue")
         id, request = await RENDER_ONDEMAND_QUEUE.get()
         stats.increment("template.render_on_demand")
-        log.debug(
-            f"Received on-demand request to render templates for {id} ({request})"
+        log.info(
+            f"[render_on_demand] Received on-demand request to render templates for {id} ({request})"
         )
-        job = RenderJob(id=id, request=request, context=ctx.get_context(request))
-        RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
-        RENDER_ONDEMAND_QUEUE.task_done()
+        try:
+            log.debug(f"[render_on_demand] Getting context for request {id}")
+            context = ctx.get_context(request)
+            log.debug(f"[render_on_demand] Context retrieved for {id}, context keys: {list(context.keys())}")
+            job = RenderJob(id=id, request=request, context=context)
+            log.debug(f"[render_on_demand] Submitting job {id} to background job manager")
+            RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
+            log.info(f"[render_on_demand] Job {id} submitted successfully")
+        except Exception as e:
+            log.error(f"[render_on_demand] Error processing on-demand request {id}: {e}", exc_info=True)
+        finally:
+            RENDER_ONDEMAND_QUEUE.task_done()
+            log.debug(f"[render_on_demand] Task done for {id}")
 
 
 async def monitor_render_queue():

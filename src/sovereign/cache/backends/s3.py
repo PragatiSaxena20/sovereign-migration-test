@@ -100,6 +100,20 @@ class S3Backend(CacheBackend):
         try:
             self.s3.head_bucket(Bucket=self.bucket_name)
             log.info(f"S3 cache backend connected to bucket '{self.bucket_name}'")
+        except ClientError as e:
+            log.warning(
+                f"Failed to access S3 bucket '{self.bucket_name}' on first attempt, retrying in 5 seconds: {e}"
+            )
+            import time
+            time.sleep(5)
+            try:
+                self.s3.head_bucket(Bucket=self.bucket_name)
+                log.info(f"S3 cache backend connected to bucket '{self.bucket_name}' on retry")
+            except Exception as e:
+                log.error(
+                    f"Failed to access S3 bucket '{self.bucket_name}' with current credentials: {e}"
+                )
+                raise
         except Exception as e:
             log.error(
                 f"Failed to access S3 bucket '{self.bucket_name}' with current credentials: {e}"

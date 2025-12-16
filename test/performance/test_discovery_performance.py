@@ -138,9 +138,7 @@ class TestDiscoveryPerformance:
                 mock_context = mock_response.text.strip('"')
                 print(f"\nMock service context: '{mock_context}'")
                 if mock_context != expected_value:
-                    print(
-                        "WARNING: Mock service context doesn't match expected value!"
-                    )
+                    print("WARNING: Mock service context doesn't match expected value!")
             else:
                 print(
                     f"\nWarning: Failed to check mock service context, status code {mock_response.status_code}"

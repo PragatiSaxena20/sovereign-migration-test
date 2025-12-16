@@ -33,18 +33,18 @@ class CacheManagerBase:
     # Client Id registration
 
     def register(self, req: DiscoveryRequest):
-        id = client_id(req)
-        log.debug(f"Registering client {id}")
-        self.local.register(id, req)
+        cid = client_id(req)
+        log.debug(f"Registering client {cid}")
+        self.local.register(cid, req)
         stats.increment("client.registration", tags=["status:registered"])
-        return id, req
+        return cid, req
 
     def registered(self, req: DiscoveryRequest) -> bool:
         ret = False
-        id = client_id(req)
-        if value := self.local.registered(id):
+        cid = client_id(req)
+        if value := self.local.registered(cid):
             ret = value
-        log.debug(f"Client {id} registered={ret}")
+        log.debug(f"Client {cid} registered={ret}")
         return ret
 
     def get_registered_clients(self) -> list[tuple[str, DiscoveryRequest]]:
@@ -55,7 +55,7 @@ class CacheManagerBase:
 
 @final
 class CacheReader(CacheManagerBase):
-    def try_read(self, key: str) -> CacheResult | None:
+    def _try_read(self, key: str) -> CacheResult | None:
         # Try filesystem first
         if value := self.local.get(key):
             stats.increment("cache.fs.hit")
@@ -73,12 +73,13 @@ class CacheReader(CacheManagerBase):
                 log.warning(f"Failed to read from remote cache: {e}")
                 stats.increment("cache.remote.error")
             stats.increment("cache.remote.miss")
-            log.warning(f"Failed to read from either cache for {key}")
+            log.debug(f"Failed to read from either cache for {key}")
         return None
 
+    # noinspection PyShadowingBuiltins
     def get(self, req: DiscoveryRequest) -> Entry | None:
         id = client_id(req)
-        if result := self.try_read(id):
+        if result := self._try_read(id):
             if result.from_remote:
                 self.register(req)
                 # Write back to filesystem
@@ -92,6 +93,7 @@ class CacheReader(CacheManagerBase):
     ) -> Entry | None:
         cid = client_id(req)
         metric = "client.registration"
+
         if entry := self.get(req):
             return entry
 
@@ -120,7 +122,8 @@ class CacheReader(CacheManagerBase):
 
         return None
 
-    def register_over_http(self, req: DiscoveryRequest) -> bool:
+    @staticmethod
+    def register_over_http(req: DiscoveryRequest) -> bool:
         registration = RegisterClientRequest(request=req)
         log.debug(f"Sending registration to worker for {req}")
         try:

@@ -121,6 +121,7 @@ dev = [
     "types-PyYAML",
     "types-cachetools",
     "ty",
+    "boto3-stubs>=1.42.11",
 ]
 
 [tool.hatch.build.targets.sdist]

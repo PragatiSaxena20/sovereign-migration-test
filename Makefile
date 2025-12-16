@@ -22,6 +22,11 @@ lint:
 	uv run ruff format --check src
 	uv run ty check src
 
+format:
+	uv run ruff format
+	uv run ruff check --fix
+	uv run ruff check --select I --fix
+
 run:
 	IMAGE_TAG=$(ENVOY_VERSION) \
 	docker compose up --wait --build \
@@ -48,7 +53,7 @@ install-deps:
 	uv sync --all-extras
 
 lock-deps:
-	docker run -it -v .:/proj python:3.12 /proj/scripts/sync-uv.sh
+	docker run -it -v .:/proj python:3.12 /proj/scripts/lock-uv.sh
 
 release: check_version
 	docker compose run \

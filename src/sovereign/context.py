@@ -85,9 +85,18 @@ class TemplateContext:
             await task.notify()
 
     def get_context(self, req: DiscoveryRequest) -> dict[str, Any]:
+        log.debug(
+            f"[TemplateContext.get_context] Getting context for resource_type={req.resource_type}, available contexts: {list(self.results.keys())}"
+        )
         ret = {r.name: r.data for r in self.results.values()}
+        log.debug(
+            f"[TemplateContext.get_context] Base context keys: {list(ret.keys())}, running {len(self.middleware)} middleware"
+        )
         for fn in self.middleware:
             fn(req, ret)
+        log.debug(
+            f"[TemplateContext.get_context] Final context keys: {list(ret.keys())}"
+        )
         return ret
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -120,6 +129,7 @@ class TemplateContext:
             next_ = heapq.heappop(self.scheduled)
             task = next_.task
             # Wait for due date
+            # noinspection PyTypeChecker
             delay = max(0, next_.due - time.monotonic())
             await asyncio.sleep(delay)
             # reschedule immediately (at next due date)
@@ -187,10 +197,8 @@ class ContextTask(pydantic.BaseModel):
                 state = ContextStatus.READY
                 break
             except Exception as e:
-                log.error(
-                    "Context failed to refresh",
-                    error=[line for line in str(e).splitlines()],
-                )
+                data = str(e)
+                log.error(f"Could not load context {self.name}: {e}")
                 state = ContextStatus.FAILED
                 stats.increment("context.refresh.error", tags=[f"context:{self.name}"])
             attempts_remaining -= 1

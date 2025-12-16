@@ -1,14 +1,16 @@
 import asyncio
 import datetime as dt
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine, NoReturn
 
 from croniter import croniter
 
 
-def wait_until(dt: datetime) -> float:
-    now = datetime.now()
-    sleep_time = (dt - now).total_seconds()
+def wait_until(target_dt: datetime) -> float:
+    now = datetime.now(timezone.utc)
+    if target_dt.tzinfo is None:
+        target_dt = target_dt.replace(tzinfo=timezone.utc)
+    sleep_time = (target_dt - now).total_seconds()
     return sleep_time
 
 

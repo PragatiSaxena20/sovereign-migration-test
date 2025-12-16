@@ -56,7 +56,7 @@ class CacheManagerBase:
 
 @final
 class CacheReader(CacheManagerBase):
-    def try_read(self, key: str) -> CacheResult | None:
+    def _try_read(self, key: str) -> CacheResult | None:
         # Try filesystem first
         if value := self.local.get(key):
             stats.increment("cache.fs.hit")
@@ -79,7 +79,7 @@ class CacheReader(CacheManagerBase):
 
     def get(self, req: DiscoveryRequest) -> Entry | None:
         id = client_id(req)
-        if result := self.try_read(id):
+        if result := self._try_read(id):
             if result.from_remote:
                 self.register(req)
                 # Write back to filesystem

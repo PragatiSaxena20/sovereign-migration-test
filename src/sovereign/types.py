@@ -234,6 +234,8 @@ class DiscoveryRequest(BaseModel):
     def resources(self) -> Resources:
         return Resources(self.resource_names)
 
+
+    # noinspection PyShadowingBuiltins
     def cache_key(self, rules: list[str]) -> str:
         map = self.model_dump()
         hash = hashlib.sha256()

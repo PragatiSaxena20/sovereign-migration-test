@@ -66,6 +66,7 @@ class S3Client:
 class S3Backend(CacheBackend):
     """S3 cache backend implementation"""
 
+
     @override
     def __init__(self, config: dict[str, Any]) -> None:  # pyright: ignore[reportMissingSuperCall]
         """Initialize S3 backend

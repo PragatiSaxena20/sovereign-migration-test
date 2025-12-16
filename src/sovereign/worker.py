@@ -129,8 +129,11 @@ async def render_on_event(ctx):
             await asyncio.sleep(config.template_context.cooldown)
 
 
+# noinspection PyShadowingBuiltins
 async def render_on_demand(ctx):
     while True:
+        id: str
+        request: DiscoveryRequest
         id, request = await ONDEMAND.get()
         stats.increment("template.render_on_demand")
         log.debug(

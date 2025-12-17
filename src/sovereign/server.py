@@ -8,17 +8,20 @@ import uvicorn
 from sovereign import application_logger as log
 from sovereign.configuration import SovereignAsgiConfig, SupervisordConfig
 
+# noinspection PyArgumentList
 asgi_config = SovereignAsgiConfig()
+# noinspection PyArgumentList
 supervisord_config = SupervisordConfig()
 
 
-def web() -> None:
+def web(is_supervisor_enabled: bool = True) -> None:
     from sovereign.app import app
 
     log.debug("Starting web server")
+
     uvicorn.run(
         app,
-        fd=0,
+        fd=0 if is_supervisor_enabled else None,
         log_level=asgi_config.log_level,
         access_log=False,
         timeout_keep_alive=asgi_config.keepalive,

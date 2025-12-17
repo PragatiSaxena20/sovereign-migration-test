@@ -6,17 +6,17 @@ to configure their own remote cache backends through entry points.
 """
 
 import asyncio
-from typing_extensions import final
 
 import requests
+from typing_extensions import final
 
-from sovereign import WORKER_URL, stats, application_logger as log
-from sovereign.types import DiscoveryRequest, RegisterClientRequest
-from sovereign.configuration import config
-from sovereign.cache.types import Entry, CacheResult
+from sovereign import WORKER_URL, stats
+from sovereign import application_logger as log
 from sovereign.cache.backends import CacheBackend, get_backend
 from sovereign.cache.filesystem import FilesystemCache
-
+from sovereign.cache.types import CacheResult, Entry
+from sovereign.configuration import config
+from sovereign.types import DiscoveryRequest, RegisterClientRequest
 
 CACHE_READ_TIMEOUT = config.cache.read_timeout
 
@@ -33,18 +33,18 @@ class CacheManagerBase:
     # Client Id registration
 
     def register(self, req: DiscoveryRequest):
-        id = client_id(req)
-        log.debug(f"Registering client {id}")
-        self.local.register(id, req)
+        cid = client_id(req)
+        log.debug(f"Registering client {cid}")
+        self.local.register(cid, req)
         stats.increment("client.registration", tags=["status:registered"])
-        return id, req
+        return cid, req
 
     def registered(self, req: DiscoveryRequest) -> bool:
         ret = False
-        id = client_id(req)
-        if value := self.local.registered(id):
+        cid = client_id(req)
+        if value := self.local.registered(cid):
             ret = value
-        log.debug(f"Client {id} registered={ret}")
+        log.debug(f"Client {cid} registered={ret}")
         return ret
 
     def get_registered_clients(self) -> list[tuple[str, DiscoveryRequest]]:
@@ -76,7 +76,6 @@ class CacheReader(CacheManagerBase):
             log.debug(f"Failed to read from either cache for {key}")
         return None
 
-
     # noinspection PyShadowingBuiltins
     def get(self, req: DiscoveryRequest) -> Entry | None:
         id = client_id(req)
@@ -104,7 +103,6 @@ class CacheReader(CacheManagerBase):
         attempt = 1
         poll_count = 0
         while (asyncio.get_event_loop().time() - start) < timeout_s:
-            elapsed = asyncio.get_event_loop().time() - start
             if not registered:
                 try:
                     if self.register_over_http(req):
@@ -114,12 +112,14 @@ class CacheReader(CacheManagerBase):
                     else:
                         stats.increment(metric, tags=["status:ratelimited"])
                         wait_time = min(attempt, CACHE_READ_TIMEOUT)
-                        log.debug(f"[blocking_read] Registration rate limited for {cache_key}, waiting {wait_time}s")
+                        log.debug(
+                            f"[blocking_read] Registration rate limited for {cid}, waiting {wait_time}s"
+                        )
                         await asyncio.sleep(wait_time)
                         attempt *= 2
                 except Exception as e:
                     stats.increment(metric, tags=["status:failed"])
-                    log.exception(f"[blocking_read] Registration failed for {cache_key}: {e}")
+                    log.exception(f"[blocking_read] Registration failed for {cid}: {e}")
 
             poll_count += 1
             if entry := self.get(req):
@@ -129,7 +129,9 @@ class CacheReader(CacheManagerBase):
             await asyncio.sleep(poll_interval_s)
 
         total_elapsed = asyncio.get_event_loop().time() - start
-        log.warning(f"[blocking_read] Timeout waiting for {cache_key} after {total_elapsed:.2f}s, {poll_count} polls, registered={registered}")
+        log.warning(
+            f"[blocking_read] Timeout waiting for {cid} after {total_elapsed:.2f}s, {poll_count} polls, registered={registered}"
+        )
         return None
 
     @staticmethod

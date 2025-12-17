@@ -3,7 +3,7 @@ Render Pool Management
 ----------------------
 
 Manages the process pool for CPU-bound rendering tasks, including:
-- Worker process initialization and logging
+- Worker process initialisation and logging
 - Metrics monitoring for pool health
 - Log message forwarding from worker processes
 """
@@ -21,110 +21,11 @@ from multiprocessing.connection import Connection
 from types import ModuleType
 from typing import Any, Callable
 
-import betterproto
 import pydantic
-from betterproto import Casing
 
-from common.typed_config import TypedConfig
-from sovereign import stats, application_logger as log
+from sovereign import application_logger as log
+from sovereign import stats
 from sovereign.types import DiscoveryRequest
-
-
-class _SerialisedMessage:
-    # noinspection PyTypeChecker
-    def __init__(self, message: betterproto.Message):
-        # Don't include default values or our deserialisation is likely to select the wrong field to populate in case
-        # of 'oneof' fields
-        self.data = message.to_dict(casing=Casing.SNAKE, include_default_values=False)
-        self.module_name = type(message).__module__
-        self.class_name = type(message).__qualname__
-
-    def deserialise(self) -> betterproto.Message:
-        import importlib
-        module = importlib.import_module(self.module_name)
-        cls = module
-        for part in self.class_name.split('.'):
-            cls = getattr(cls, part)
-        # noinspection PyCallingNonCallable
-        message = cls().from_dict(self.data)
-        # Post-process to inject TypedConfig objects into Any fields
-        _inject_typed_configs(message, self.data)
-        return message
-
-
-def _inject_typed_configs(message: betterproto.Message, data: dict) -> None:
-    """
-    Walk through a deserialised betterproto Message and inject TypedConfig objects
-    into Any fields. This is needed because betterproto's from_dict() doesn't know
-    how to reconstruct TypedConfig objects from dicts with @type fields.
-    """
-    for field_name, field_value in data.items():
-        if not hasattr(message, field_name):
-            continue
-
-        current_value = getattr(message, field_name)
-
-        if isinstance(field_value, dict) and "@type" in field_value:
-            # This is a TypedConfig - inject it directly
-            setattr(message, field_name, TypedConfig(field_value))
-        elif isinstance(field_value, dict) and isinstance(current_value, dict):
-            # Handle map fields - recursively process each value
-            new_map = {k: _process_value(v) for k, v in field_value.items()}
-            setattr(message, field_name, new_map)
-        elif isinstance(field_value, dict) and isinstance(current_value, betterproto.Message):
-            # Recurse into nested messages
-            _inject_typed_configs(current_value, field_value)
-        elif isinstance(field_value, list) and isinstance(current_value, list):
-            # Handle lists of messages
-            for item_data, item_value in zip(field_value, current_value):
-                if isinstance(item_data, dict) and isinstance(item_value, betterproto.Message):
-                    _inject_typed_configs(item_value, item_data)
-
-
-def _process_value(value: Any) -> Any:
-    """
-    Recursively process a value, converting dicts with @type to TypedConfig
-    and recursing into nested dicts and lists.
-    """
-    if isinstance(value, dict):
-        if "@type" in value:
-            return TypedConfig(value)
-        else:
-            return {k: _process_value(v) for k, v in value.items()}
-    elif isinstance(value, list):
-        return [_process_value(item) for item in value]
-    else:
-        return value
-
-
-def _make_pickleable(obj: Any) -> Any:
-    if isinstance(obj, betterproto.Message):
-        return _SerialisedMessage(obj)
-    elif isinstance(obj, dict):
-        return {k: _make_pickleable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_make_pickleable(item) for item in obj]
-    elif isinstance(obj, tuple):
-        return tuple(_make_pickleable(item) for item in obj)
-    elif isinstance(obj, set):
-        return {_make_pickleable(item) for item in obj}
-    else:
-        return obj
-
-
-def _restore_from_pickleable(obj: Any) -> Any:
-    if isinstance(obj, _SerialisedMessage):
-        return obj.deserialise()
-    elif isinstance(obj, dict):
-        return {k: _restore_from_pickleable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_restore_from_pickleable(item) for item in obj]
-    elif isinstance(obj, tuple):
-        return tuple(_restore_from_pickleable(item) for item in obj)
-    elif isinstance(obj, set):
-        return {_restore_from_pickleable(item) for item in obj}
-    else:
-        return obj
 
 
 def _worker_initialiser(log_tx: Connection):
@@ -224,7 +125,9 @@ class RenderJobManager:
 
         # Log current pool state before submission
         try:
-            pending_count = len(self.executor._pending_work_items) if self.executor else 0
+            pending_count = (
+                len(self.executor._pending_work_items) if self.executor else 0
+            )
             process_count = len(self.executor._processes) if self.executor else 0
             log.debug(
                 f"[RenderJobManager] Pool state before submit - pending: {pending_count}, processes: {process_count}/{self.num_workers}"
@@ -238,13 +141,15 @@ class RenderJobManager:
         modules = {}
         pickleable_job_context = {}
 
-        log.debug(f"[RenderJobManager] Converting context to pickleable for job {job.id}, context keys: {list(job.context.keys())}")
+        log.debug(
+            f"[RenderJobManager] Converting context to pickleable for job {job.id}, context keys: {list(job.context.keys())}"
+        )
         for k, v in job.context.items():
             if isinstance(v, ModuleType):  # check if it's a module
                 modules[k] = v.__name__
             else:
                 # Convert betterproto Message objects to dicts to survive pickling
-                pickleable_job_context[k] = _make_pickleable(v)
+                pickleable_job_context[k] = v
 
         log.debug(
             f"[RenderJobManager] Context converted for job {job.id}, modules: {list(modules.keys())}"
@@ -269,7 +174,9 @@ class RenderJobManager:
         def log_result(fut):
             try:
                 fut.result()  # This will raise if the job failed
-                log.info(f"[RenderJobManager] Render job {job.id} completed successfully")
+                log.info(
+                    f"[RenderJobManager] Render job {job.id} completed successfully"
+                )
             except Exception as e:
                 log.error(
                     f"[RenderJobManager] Render job {job.id} failed with exception: {e}"
@@ -277,7 +184,9 @@ class RenderJobManager:
                 log.error(f"[RenderJobManager] Traceback: {traceback.format_exc()}")
 
         future.add_done_callback(log_result)
-        log.info(f"[RenderJobManager] Render job {job.id} submitted to executor, future created")
+        log.info(
+            f"[RenderJobManager] Render job {job.id} submitted to executor, future created"
+        )
 
     def shutdown(self):
         self._stop_event.set()

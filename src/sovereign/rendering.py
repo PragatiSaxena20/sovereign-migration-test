@@ -21,10 +21,10 @@ from starlette.exceptions import HTTPException
 # noinspection PyProtectedMember
 from yaml.parser import ParserError, ScannerError  # type: ignore
 
-from sovereign import logs, cache, stats
+from sovereign import cache, logs, stats
 from sovereign.cache.types import Entry
 from sovereign.configuration import config
-from sovereign.render_pool import RenderJob, _restore_from_pickleable
+from sovereign.render_pool import RenderJob
 from sovereign.types import ProcessedTemplate, TemplateMissingArgsError
 
 writer = cache.CacheWriter()
@@ -107,14 +107,13 @@ def generate(job: RenderJob, log_tx: Connection) -> None:
             "phase": "restoring_context",
         }
     )
-    restored_context = _restore_from_pickleable(job.context)
     log_tx.send(
         {
             "level": "DEBUG",
-            "message": f"Context restored for job {job.id}, context keys: {list(restored_context.keys())}",
+            "message": f"Context restored for job {job.id}, context keys: {list(job.context.keys())}",
             "pid": os.getpid(),
             "job_id": job.id,
-            "context_keys": list(restored_context.keys()),
+            "context_keys": list(job.context.keys()),
             "phase": "context_restored",
         }
     )
@@ -127,8 +126,12 @@ def generate(job: RenderJob, log_tx: Connection) -> None:
                     "message": f"Starting template generation for job {job.id}",
                     "pid": os.getpid(),
                     "job_id": job.id,
-                    "template_type": request.template.resource_type if hasattr(request.template, 'resource_type') else 'unknown',
-                    "is_python_source": request.template.is_python_source if hasattr(request.template, 'is_python_source') else 'unknown',
+                    "template_type": request.template.resource_type
+                    if hasattr(request.template, "resource_type")
+                    else "unknown",
+                    "is_python_source": request.template.is_python_source
+                    if hasattr(request.template, "is_python_source")
+                    else "unknown",
                     "phase": "template_generate_start",
                 }
             )
@@ -138,7 +141,7 @@ def generate(job: RenderJob, log_tx: Connection) -> None:
                     host_header=request.desired_controlplane,
                     resource_names=request.resources,
                     **loaded_modules,
-                    **restored_context,
+                    **job.context,
                 )
             except TemplateMissingArgsError as e:
                 log_tx.send(
@@ -174,7 +177,9 @@ def generate(job: RenderJob, log_tx: Connection) -> None:
                         "message": f"Deserializing YAML config for job {job.id}",
                         "pid": os.getpid(),
                         "job_id": job.id,
-                        "content_length": len(content) if isinstance(content, str) else 0,
+                        "content_length": len(content)
+                        if isinstance(content, str)
+                        else 0,
                         "phase": "deserialize_start",
                     }
                 )

@@ -1,23 +1,25 @@
 import asyncio
-from typing import final
 from contextlib import asynccontextmanager
+from typing import final
 
-from fastapi import FastAPI, Body
+from fastapi import Body, FastAPI
 
 from sovereign import (
+    application_logger as log,
+)
+from sovereign import (
     cache,
+    disabled_ciphersuite,
     rendering,
     server_cipher_container,
-    disabled_ciphersuite,
-    application_logger as log,
     stats,
 )
-from sovereign.context import TemplateContext
-from sovereign.render_pool import RenderJobManager, RenderJob
-from sovereign.sources import SourcePoller
 from sovereign.configuration import config
-from sovereign.types import RegisterClientRequest, DiscoveryRequest
-from sovereign.events import bus, Topic
+from sovereign.context import TemplateContext
+from sovereign.events import Topic, bus
+from sovereign.render_pool import RenderJob, RenderJobManager
+from sovereign.sources import SourcePoller
+from sovereign.types import DiscoveryRequest, RegisterClientRequest
 
 
 # noinspection PyUnusedLocal
@@ -120,14 +122,18 @@ async def render_on_event(ctx):
         try:
             if registered := writer.get_registered_clients():
                 size = len(registered)
-                log.info(f"[render_on_event] Found {size} registered clients to potentially render")
+                log.info(
+                    f"[render_on_event] Found {size} registered clients to potentially render"
+                )
                 stats.increment("template.render_on_event", tags=[f"batch_size:{size}"])
 
                 rendered_count = 0
                 skipped_count = 0
                 for client, request in registered:
                     if context_name in request.template.depends_on:
-                        log.debug(f"[render_on_event] Client {client} depends on {context_name}, rendering template for {request}")
+                        log.debug(
+                            f"[render_on_event] Client {client} depends on {context_name}, rendering template for {request}"
+                        )
                         job = RenderJob(
                             id=client,
                             request=request,
@@ -136,15 +142,23 @@ async def render_on_event(ctx):
                         RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
                         rendered_count += 1
                     else:
-                        log.debug(f"[render_on_event] Client {client} does not depend on {context_name}, skipping")
+                        log.debug(
+                            f"[render_on_event] Client {client} does not depend on {context_name}, skipping"
+                        )
                         skipped_count += 1
-                log.info(f"[render_on_event] Submitted {rendered_count} render jobs, skipped {skipped_count} clients")
+                log.info(
+                    f"[render_on_event] Submitted {rendered_count} render jobs, skipped {skipped_count} clients"
+                )
             else:
                 log.debug("[render_on_event] No registered clients found")
         except Exception as e:
-            log.error(f"[render_on_event] Error processing context event: {e}", exc_info=True)
+            log.error(
+                f"[render_on_event] Error processing context event: {e}", exc_info=True
+            )
         finally:
-            log.debug(f"[render_on_event] Entering cooldown for {config.template_context.cooldown} seconds")
+            log.debug(
+                f"[render_on_event] Entering cooldown for {config.template_context.cooldown} seconds"
+            )
             await asyncio.sleep(config.template_context.cooldown)
 
 
@@ -153,24 +167,31 @@ async def render_on_demand(ctx):
     while True:
         # noinspection PyShadowingBuiltins
         log.debug("[render_on_demand] Waiting for next request from queue")
-        id, request = await RENDER_ONDEMAND_QUEUE.get()
+        client_id, request = await RENDER_ONDEMAND_QUEUE.get()
         stats.increment("template.render_on_demand")
         log.info(
-            f"[render_on_demand] Received on-demand request to render templates for {id} ({request})"
+            f"[render_on_demand] Received on-demand request to render templates for {client_id} ({request})"
         )
         try:
-            log.debug(f"[render_on_demand] Getting context for request {id}")
+            log.debug(f"[render_on_demand] Getting context for request {client_id}")
             context = ctx.get_context(request)
-            log.debug(f"[render_on_demand] Context retrieved for {id}, context keys: {list(context.keys())}")
-            job = RenderJob(id=id, request=request, context=context)
-            log.debug(f"[render_on_demand] Submitting job {id} to background job manager")
+            log.debug(
+                f"[render_on_demand] Context retrieved for {client_id}, context keys: {list(context.keys())}"
+            )
+            job = RenderJob(id=client_id, request=request, context=context)
+            log.debug(
+                f"[render_on_demand] Submitting job {client_id} to background job manager"
+            )
             RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
-            log.info(f"[render_on_demand] Job {id} submitted successfully")
+            log.info(f"[render_on_demand] Job {client_id} submitted successfully")
         except Exception as e:
-            log.error(f"[render_on_demand] Error processing on-demand request {id}: {e}", exc_info=True)
+            log.error(
+                f"[render_on_demand] Error processing on-demand request {client_id}: {e}",
+                exc_info=True,
+            )
         finally:
-            await RENDER_ONDEMAND_QUEUE.task_done(id)
-            log.debug(f"[render_on_demand] Task done for {id}")
+            await RENDER_ONDEMAND_QUEUE.task_done(client_id)
+            log.debug(f"[render_on_demand] Task done for {client_id}")
 
 
 async def monitor_render_queue():
@@ -239,6 +260,6 @@ async def client_add(
 ):
     log.info(f"Received registration: {registration.request}")
     xds = registration.request
-    id, req = writer.register(xds)
-    ONDEMAND.put_nowait((id, req))
+    client_id, req = writer.register(xds)
+    RENDER_ONDEMAND_QUEUE.put_nowait((client_id, req))
     return "Registered", 200

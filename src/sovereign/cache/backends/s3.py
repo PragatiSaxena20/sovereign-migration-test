@@ -1,9 +1,10 @@
 import pickle
-from datetime import datetime, timezone, timedelta
-from typing import Any
-from typing_extensions import override
-from urllib.parse import quote
+from datetime import datetime, timedelta, timezone
 from importlib.util import find_spec
+from typing import Any
+from urllib.parse import quote
+
+from typing_extensions import override
 
 from sovereign import application_logger as log
 from sovereign.cache.backends import CacheBackend
@@ -105,10 +106,13 @@ class S3Backend(CacheBackend):
                 f"Failed to access S3 bucket '{self.bucket_name}' on first attempt, retrying in 5 seconds: {e}"
             )
             import time
+
             time.sleep(5)
             try:
                 self.s3.head_bucket(Bucket=self.bucket_name)
-                log.info(f"S3 cache backend connected to bucket '{self.bucket_name}' on retry")
+                log.info(
+                    f"S3 cache backend connected to bucket '{self.bucket_name}' on retry"
+                )
             except Exception as e:
                 log.error(
                     f"Failed to access S3 bucket '{self.bucket_name}' with current credentials: {e}"

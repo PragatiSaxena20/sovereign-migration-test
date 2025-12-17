@@ -6,7 +6,6 @@ to configure their own remote cache backends through entry points.
 """
 
 import asyncio
-from typing import Any
 from typing_extensions import final
 
 import requests
@@ -74,9 +73,11 @@ class CacheReader(CacheManagerBase):
                 log.warning(f"Failed to read from remote cache: {e}")
                 stats.increment("cache.remote.error")
             stats.increment("cache.remote.miss")
-            log.warning(f"Failed to read from either cache for {key}")
+            log.debug(f"Failed to read from either cache for {key}")
         return None
 
+
+    # noinspection PyShadowingBuiltins
     def get(self, req: DiscoveryRequest) -> Entry | None:
         id = client_id(req)
         if result := self._try_read(id):
@@ -93,6 +94,7 @@ class CacheReader(CacheManagerBase):
     ) -> Entry | None:
         cid = client_id(req)
         metric = "client.registration"
+
         if entry := self.get(req):
             return entry
 
@@ -100,7 +102,9 @@ class CacheReader(CacheManagerBase):
         registered = False
         start = asyncio.get_event_loop().time()
         attempt = 1
+        poll_count = 0
         while (asyncio.get_event_loop().time() - start) < timeout_s:
+            elapsed = asyncio.get_event_loop().time() - start
             if not registered:
                 try:
                     if self.register_over_http(req):
@@ -109,19 +113,27 @@ class CacheReader(CacheManagerBase):
                         log.info(f"Client {cid} registered")
                     else:
                         stats.increment(metric, tags=["status:ratelimited"])
-                        await asyncio.sleep(min(attempt, CACHE_READ_TIMEOUT))
+                        wait_time = min(attempt, CACHE_READ_TIMEOUT)
+                        log.debug(f"[blocking_read] Registration rate limited for {cache_key}, waiting {wait_time}s")
+                        await asyncio.sleep(wait_time)
                         attempt *= 2
                 except Exception as e:
                     stats.increment(metric, tags=["status:failed"])
-                    log.exception(f"Tried to register client but failed: {e}")
+                    log.exception(f"[blocking_read] Registration failed for {cache_key}: {e}")
+
+            poll_count += 1
             if entry := self.get(req):
                 log.info(f"Entry has been populated for {cid}")
                 return entry
+
             await asyncio.sleep(poll_interval_s)
 
+        total_elapsed = asyncio.get_event_loop().time() - start
+        log.warning(f"[blocking_read] Timeout waiting for {cache_key} after {total_elapsed:.2f}s, {poll_count} polls, registered={registered}")
         return None
 
-    def register_over_http(self, req: DiscoveryRequest) -> bool:
+    @staticmethod
+    def register_over_http(req: DiscoveryRequest) -> bool:
         registration = RegisterClientRequest(request=req)
         log.debug(f"Sending registration to worker for {req}")
         try:

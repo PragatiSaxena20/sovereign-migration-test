@@ -13,18 +13,24 @@ from sovereign import (
     stats,
 )
 from sovereign.context import TemplateContext
+from sovereign.render_pool import RenderJobManager, RenderJob
 from sovereign.sources import SourcePoller
 from sovereign.configuration import config
 from sovereign.types import RegisterClientRequest, DiscoveryRequest
 from sovereign.events import bus, Topic
 
 
+# noinspection PyUnusedLocal
 def hidden_field(*args, **kwargs):
     return "(value hidden)"
 
 
+def shown_field(value):
+    return value
+
+
 def inject_builtin_items(request, output):
-    output["__hide_from_ui"] = lambda v: v
+    output["__hide_from_ui"] = shown_field
     output["crypto"] = server_cipher_container
     if request.is_internal_request:
         output["__hide_from_ui"] = hidden_field
@@ -75,8 +81,8 @@ class RenderQueue:
         self._queue.task_done()
 
 
-ONDEMAND = RenderQueue()
-
+RENDER_ONDEMAND_QUEUE = RenderQueue()
+RENDER_BACKGROUND_JOB_MANAGER = RenderJobManager()
 
 poller = None
 if config.sources is not None:
@@ -102,55 +108,79 @@ if config.sources is not None:
 
 async def render_on_event(ctx):
     subscription = bus.subscribe(Topic.CONTEXT)
+    log.info("[render_on_event] Started, waiting for context events")
     while True:
         # block forever until new context arrives
+        log.debug("[render_on_event] Waiting for next context event")
         event = await subscription.get()
         context_name = event.metadata.get("name")
 
+        log.info(f"[render_on_event] Received context event: {context_name}")
         log.debug(event.message)
         try:
             if registered := writer.get_registered_clients():
                 size = len(registered)
+                log.info(f"[render_on_event] Found {size} registered clients to potentially render")
                 stats.increment("template.render_on_event", tags=[f"batch_size:{size}"])
 
+                rendered_count = 0
+                skipped_count = 0
                 for client, request in registered:
                     if context_name in request.template.depends_on:
-                        log.info(
-                            f"Rendering template on-event for {request} because {context_name} was updated"
-                        )
-                        job = rendering.RenderJob(
+                        log.debug(f"[render_on_event] Client {client} depends on {context_name}, rendering template for {request}")
+                        job = RenderJob(
                             id=client,
                             request=request,
                             context=ctx.get_context(request),
                         )
-                        job.submit()
-
+                        RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
+                        rendered_count += 1
+                    else:
+                        log.debug(f"[render_on_event] Client {client} does not depend on {context_name}, skipping")
+                        skipped_count += 1
+                log.info(f"[render_on_event] Submitted {rendered_count} render jobs, skipped {skipped_count} clients")
+            else:
+                log.debug("[render_on_event] No registered clients found")
+        except Exception as e:
+            log.error(f"[render_on_event] Error processing context event: {e}", exc_info=True)
         finally:
+            log.debug(f"[render_on_event] Entering cooldown for {config.template_context.cooldown} seconds")
             await asyncio.sleep(config.template_context.cooldown)
 
 
-# noinspection PyShadowingBuiltins
 async def render_on_demand(ctx):
+    log.info("[render_on_demand] Started, waiting for on-demand render requests")
     while True:
-        id: str
-        request: DiscoveryRequest
-        id, request = await ONDEMAND.get()
+        # noinspection PyShadowingBuiltins
+        log.debug("[render_on_demand] Waiting for next request from queue")
+        id, request = await RENDER_ONDEMAND_QUEUE.get()
         stats.increment("template.render_on_demand")
-        log.debug(
-            f"Received on-demand request to render templates for {id} ({request})"
+        log.info(
+            f"[render_on_demand] Received on-demand request to render templates for {id} ({request})"
         )
-        job = rendering.RenderJob(
-            id=id, request=request, context=ctx.get_context(request)
-        )
-        _ = job.submit()
-        await ONDEMAND.task_done(id)
+        try:
+            log.debug(f"[render_on_demand] Getting context for request {id}")
+            context = ctx.get_context(request)
+            log.debug(f"[render_on_demand] Context retrieved for {id}, context keys: {list(context.keys())}")
+            job = RenderJob(id=id, request=request, context=context)
+            log.debug(f"[render_on_demand] Submitting job {id} to background job manager")
+            RENDER_BACKGROUND_JOB_MANAGER.submit(job, rendering.generate)
+            log.info(f"[render_on_demand] Job {id} submitted successfully")
+        except Exception as e:
+            log.error(f"[render_on_demand] Error processing on-demand request {id}: {e}", exc_info=True)
+        finally:
+            await RENDER_ONDEMAND_QUEUE.task_done(id)
+            log.debug(f"[render_on_demand] Task done for {id}")
 
 
 async def monitor_render_queue():
     """Periodically report render queue size metrics"""
     while True:
         await asyncio.sleep(10)
-        stats.gauge("template.on_demand_queue_size", ONDEMAND._queue.qsize())
+        # noinspection PyProtectedMember
+        stats.gauge(
+            "template.on_demand_queue_size", RENDER_ONDEMAND_QUEUE._queue.qsize()
+        )
 
 
 @asynccontextmanager
@@ -178,11 +208,18 @@ async def lifespan(_: FastAPI):
     log.debug("Worker lifespan initialized")
     yield
 
+    # Cleanup
+    log.debug("Shutting down render job manager")
+    RENDER_BACKGROUND_JOB_MANAGER.shutdown()
+
 
 worker = FastAPI(lifespan=lifespan)
 if dsn := config.sentry_dsn.get_secret_value():
     try:
+        # noinspection PyUnusedImports
         import sentry_sdk
+
+        # noinspection PyUnusedImports
         from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
 
         sentry_sdk.init(dsn)

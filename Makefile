@@ -48,7 +48,7 @@ install-deps:
 	uv sync --all-extras
 
 lock-deps:
-	docker run -it -v .:/proj python:3.12 /proj/scripts/sync-uv.sh
+	docker run -it -v .:/proj python:3.12 /proj/scripts/lock-uv.sh
 
 release: check_version
 	docker compose run \

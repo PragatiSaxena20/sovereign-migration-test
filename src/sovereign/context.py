@@ -121,6 +121,7 @@ class TemplateContext:
             next_ = heapq.heappop(self.scheduled)
             task = next_.task
             # Wait for due date
+            # noinspection PyTypeChecker
             delay = max(0, next_.due - time.monotonic())
             await asyncio.sleep(delay)
             # reschedule immediately (at next due date)

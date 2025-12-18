@@ -16,14 +16,14 @@ import threading
 import traceback
 from concurrent.futures.process import ProcessPoolExecutor
 from multiprocessing import Pipe, cpu_count
-
 # noinspection PyProtectedMember
 from multiprocessing.connection import Connection
 from types import ModuleType
-from typing import Any, Callable
+from typing import Callable, Any
 
 import pydantic
 
+from common.types import RenderJobContext
 from sovereign import application_logger as log
 from sovereign import stats
 from sovereign.types import DiscoveryRequest
@@ -140,7 +140,7 @@ class RenderJobManager:
         # context and then add them to the job to be loaded in the
         # worker sub-process.
         modules = {}
-        pickleable_job_context = {}
+        pickleable_job_context: dict[str, Any] = {}
 
         log.debug(
             f"[RenderJobManager] Converting context to pickleable for job {job.id}, context keys: {list(job.context.keys())}"
@@ -149,7 +149,6 @@ class RenderJobManager:
             if isinstance(v, ModuleType):  # check if it's a module
                 modules[k] = v.__name__
             else:
-                # Convert betterproto Message objects to dicts to survive pickling
                 pickleable_job_context[k] = v
 
         log.debug(
@@ -162,20 +161,6 @@ class RenderJobManager:
             context=pickleable_job_context,
             modules=modules,
         )
-
-        # ensure that we can pickle/unpickle the job successfully
-        pickled_job = pickle.dumps(pickleable_job)
-        unpickled_job = pickle.loads(pickled_job)
-
-        # check every route in every vhost for differences
-        for route in pickleable_job.context["vhosts"].routes:
-
-        # Test equality and log detailed differences if mismatch
-        if pickleable_job != unpickled_job:
-            # Compare all routes
-
-
-            raise ValueError(f"[RenderJobManager] Could not successfully pickle `RenderJob` for {job.id}")
 
         log.debug(f"[RenderJobManager] Submitting job {job.id} to executor")
         future = self.executor.submit(generate_func, pickleable_job, self.log_tx)

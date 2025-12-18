@@ -10,6 +10,7 @@ Manages the process pool for CPU-bound rendering tasks, including:
 
 import faulthandler
 import os
+import pickle
 import sys
 import threading
 import traceback
@@ -162,11 +163,19 @@ class RenderJobManager:
             modules=modules,
         )
 
-        # if job.request.resource_type == 'routes':
-        #     a = job.context['instances'][52]['parameters']['vhosts'][0]['routes'][0]
-        #     b = _make_pickleable(a)
-        #     c = _restore_from_pickleable(b)
-        #     print("hello")
+        # ensure that we can pickle/unpickle the job successfully
+        pickled_job = pickle.dumps(pickleable_job)
+        unpickled_job = pickle.loads(pickled_job)
+
+        # check every route in every vhost for differences
+        for route in pickleable_job.context["vhosts"].routes:
+
+        # Test equality and log detailed differences if mismatch
+        if pickleable_job != unpickled_job:
+            # Compare all routes
+
+
+            raise ValueError(f"[RenderJobManager] Could not successfully pickle `RenderJob` for {job.id}")
 
         log.debug(f"[RenderJobManager] Submitting job {job.id} to executor")
         future = self.executor.submit(generate_func, pickleable_job, self.log_tx)

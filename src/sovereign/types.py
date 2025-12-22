@@ -69,6 +69,7 @@ class Node(BaseModel):
         description="The ``--service-cluster`` configured by the Envoy client",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, title="Key:value metadata")
+    # noinspection PyArgumentList
     locality: Locality = Field(Locality(), title="Locality")
     build_version: str | None = Field(
         None,  # Optional in the v3 Envoy API

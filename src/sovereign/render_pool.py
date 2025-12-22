@@ -10,7 +10,6 @@ Manages the process pool for CPU-bound rendering tasks, including:
 
 import faulthandler
 import os
-import pickle
 import sys
 import threading
 import traceback
@@ -23,7 +22,6 @@ from typing import Callable, Any
 
 import pydantic
 
-from common.types import RenderJobContext
 from sovereign import application_logger as log
 from sovereign import stats
 from sovereign.types import DiscoveryRequest

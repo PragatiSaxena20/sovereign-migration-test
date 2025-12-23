@@ -165,11 +165,19 @@ class ContextTask(pydantic.BaseModel):
         )
 
     async def refresh(self, output: dict[str, "ContextResult"]) -> None:
-        result = await self.try_load()
+        first_poll = False
+        if output.get(self.name) is None:
+            first_poll = True
+        result = await self.try_load(first_poll)
         if result.state == ContextStatus.READY:
             output[self.name] = result
 
-    async def try_load(self) -> "ContextResult":
+    async def try_load(self, first_poll: bool = False) -> "ContextResult":
+        if first_poll:
+            success = "context.refresh.initial"
+        else:
+            success = "context.refresh.success"
+
         attempts_remaining, retry_interval = TaskRetryPolicy.from_task(self)
         data = None
         state = ContextStatus.PENDING
@@ -181,9 +189,7 @@ class ContextTask(pydantic.BaseModel):
                     data = await load_fn()
                 else:
                     data = load_fn()
-                stats.increment(
-                    "context.refresh.success", tags=[f"context:{self.name}"]
-                )
+                stats.increment(success, tags=[f"context:{self.name}"])
                 state = ContextStatus.READY
                 break
             except Exception as e:

@@ -565,6 +565,7 @@ config_path = os.getenv("SOVEREIGN_CONFIG", "file:///etc/sovereign.yaml")
 config = SovereignConfigv2(**parse_raw_configuration(config_path))
 
 XDS_TEMPLATES = config.xds_templates()
+HASH_RULES = config.cache.hash_rules
 
 # Create an enum that bases all the available discovery types off what has been configured
 discovery_types = (_type for _type in sorted(XDS_TEMPLATES["__any__"].keys()))

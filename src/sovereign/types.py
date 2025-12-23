@@ -233,7 +233,12 @@ class DiscoveryRequest(BaseModel):
     def resources(self) -> Resources:
         return Resources(self.resource_names)
 
-    def cache_key(self, rules: list[str]) -> str:
+    def cache_key(self, rules: list[str] | None) -> str:
+        if rules is None:
+            # lazy load configured templates
+            mod = importlib.import_module("sovereign.configuration")
+            rules = cast(list[str], mod.HASH_RULES)
+
         map = self.model_dump()
         hash = hashlib.sha256()
         for expr in sorted(rules):
@@ -241,6 +246,19 @@ class DiscoveryRequest(BaseModel):
             val_str = f"{expr}={repr(value)}"
             hash.update(val_str.encode())
         return hash.hexdigest()
+
+    def __hash__(self) -> int:
+        # lazy load configured templates
+        mod = importlib.import_module("sovereign.configuration")
+        rules = cast(list[str], mod.HASH_RULES)
+
+        map = self.model_dump()
+        sha = hashlib.sha256()
+        for expr in sorted(rules):
+            value = cast(str, jmespath.search(expr, map))
+            val_str = f"{expr}={repr(value)}"
+            sha.update(val_str.encode())
+        return int.from_bytes(sha.digest(), "big")
 
     @computed_field  # type: ignore[misc]
     @property

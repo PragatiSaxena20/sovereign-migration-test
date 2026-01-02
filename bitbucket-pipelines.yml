@@ -41,6 +41,14 @@ pipelines:
   default:
     - parallel: &tests
       - step:
+          name: Enforce Conventional Commits
+          caches: [pip]
+          script:
+            - *set_environment
+            - *install_uv
+            - make install-deps
+            - uv run git cliff ${BITBUCKET_PR_DESTINATION_BRANCH}..HEAD
+      - step:
           name: Unit tests
           caches:
             - pip

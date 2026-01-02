@@ -41,14 +41,6 @@ pipelines:
   default:
     - parallel: &tests
       - step:
-          name: Enforce Conventional Commits
-          caches: [pip]
-          script:
-            - *set_environment
-            - *install_uv
-            - make install-deps
-            - uv run git cliff ${BITBUCKET_PR_DESTINATION_BRANCH}..HEAD
-      - step:
           name: Unit tests
           caches:
             - pip
@@ -141,3 +133,14 @@ pipelines:
             - make release
     '*.*.*a*': *prerelease
     '*.*.*b*': *prerelease
+
+  pull-requests:
+    '**':
+      - step:
+          name: "Enforce Conventional Commits"
+          script:
+            - *set_environment
+            - *install_uv
+            - make install-deps
+            - git fetch origin ${BITBUCKET_PR_DESTINATION_BRANCH}
+            - uv run git-cliff --unreleased "origin/${BITBUCKET_PR_DESTINATION_BRANCH}..${BITBUCKET_COMMIT}"

@@ -121,6 +121,7 @@ dev = [
     "types-PyYAML",
     "types-cachetools",
     "ty==0.0.1a26",
+    "git-cliff>=2.11.0",
 ]
 
 [tool.hatch.build.targets.sdist]

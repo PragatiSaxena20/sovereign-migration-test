@@ -1,8 +1,16 @@
 Changelog
 =========
 
-1.0.0 TBA
----------
+## [unreleased]
+
+### Miscellaneous
+
+- add git-cliff to repo to enforce conventional commits - ([dd046e9](https://bitbucket.org/atlassian/sovereign/commit/dd046e9f68998d9cdb6419f30cfc4fa0b4727c3e)) - Vasilios Syrakis
+
+
+---
+
+<!-- TODO: replace the below section with up-to-date info about 1.0 and migration guide -->
 
 We have tried to identify and label areas where APIs have been broken,
 however due to the volume of change, some unexpected functionality may break.

@@ -42,8 +42,8 @@ postprocessors = [
 # See https://www.conventionalcommits.org
 conventional_commits = true
 require_conventional = true
-filter_unconventional = false # Exclude commits that do not match the conventional commits specification.
-fail_on_unmatched_commit = false
+filter_unconventional = false # Include commits that do not match the conventional commits specification.
+fail_on_unmatched_commit = true
 # Split commits on newlines, treating each line as an individual commit.
 split_commits = false
 # An array of regex based parsers to modify commit messages prior to further processing.

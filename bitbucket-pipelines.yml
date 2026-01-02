@@ -31,8 +31,7 @@ definitions:
   export DOCKER_BUILDKIT=0
 
 .install_uv: &install_uv |
-  pip install pipx
-  pipx install uv
+  pip install uv
 
 options:
   docker: true
@@ -43,7 +42,7 @@ pipelines:
       - step:
           name: Unit tests
           caches:
-            - pip
+            - uv
             - docker-cliplugins
           script:
             - *set_environment
@@ -54,7 +53,7 @@ pipelines:
             - make unit
       - step:
           name: Linting
-          caches: [pip]
+          caches: [uv]
           script:
             - *set_environment
             - *install_uv
@@ -62,7 +61,7 @@ pipelines:
             - uv run ruff check src/sovereign
       - step:
           name: Format check
-          caches: [pip]
+          caches: [uv]
           script:
             - *set_environment
             - *install_uv
@@ -70,7 +69,7 @@ pipelines:
             - uv run ruff format --check src/sovereign
       - step:
           name: Type checks
-          caches: [pip]
+          caches: [uv]
           script:
             - *set_environment
             - *install_uv
@@ -82,7 +81,7 @@ pipelines:
           services:
             - docker
           caches:
-            - pip
+            - uv
             - docker-cliplugins
           script:
             - *set_buildkit_false
@@ -107,7 +106,7 @@ pipelines:
           name: Release to PyPI
           deployment: release
           caches:
-            - pip
+            - uv
             - docker-cliplugins
           script:
             - *set_environment
@@ -115,13 +114,15 @@ pipelines:
             - *setup-docker-compose-latest-script
             - *install_uv
             - make install-deps
+            - export PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${BITBUCKET_TAG}^")
+            - git-cliff "${PREVIOUS_TAG}..${BITBUCKET_TAG}" --unreleased || git-cliff "${BITBUCKET_TAG}" --unreleased
             - make release
     '*.*.*rc*': &prerelease
       - step:
           name: Pre-release to PyPI
           deployment: prerelease
           caches:
-            - pip
+            - uv
             - docker-cliplugins
           script:
             - *set_environment
@@ -130,6 +131,8 @@ pipelines:
             - *install_uv
             - make install-deps
             - uv run python scripts/release_check.py
+            - export PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${BITBUCKET_TAG}^")
+            - git-cliff "${PREVIOUS_TAG}..${BITBUCKET_TAG}" --unreleased || git-cliff "${BITBUCKET_TAG}" --unreleased
             - make release
     '*.*.*a*': *prerelease
     '*.*.*b*': *prerelease

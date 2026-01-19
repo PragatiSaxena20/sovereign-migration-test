@@ -116,6 +116,7 @@ class S3Backend(CacheBackend):
             raise
 
     def _make_key(self, key: str) -> str:
+        # noop
         if self.remote_cache_suffix:
             encoded_key = quote(f"{key}{self.remote_cache_suffix}", safe="")
         else:

@@ -91,7 +91,7 @@ class S3Backend(CacheBackend):
         self.prefix = config.get("prefix", "sovereign-cache")
         self.registration_prefix = config.get("registration_prefix", "registrations-")
         self.role = config.get("assume_role")
-        self.remote_cache_suffix = config.get("remote_cache_suffix")
+        self.remote_cache_key_suffix = config.get("remote_cache_key_suffix")
 
         client_args: dict[str, Any] = {}
         if endpoint_url := config.get("endpoint_url"):
@@ -117,8 +117,8 @@ class S3Backend(CacheBackend):
 
     def _make_key(self, key: str) -> str:
         # noop
-        if self.remote_cache_suffix:
-            encoded_key = quote(f"{key}{self.remote_cache_suffix}", safe="")
+        if self.remote_cache_key_suffix:
+            encoded_key = quote(f"{key}{self.remote_cache_key_suffix}", safe="")
         else:
             encoded_key = quote(key, safe="")
         return f"{self.prefix}/{encoded_key}"

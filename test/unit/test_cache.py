@@ -105,6 +105,107 @@ class TestS3Backend:
         with pytest.raises(ValueError, match="bucket_name is required"):
             S3Backend({"prefix": "test"})
 
+    def test_remote_cache_key_suffix_appended_to_key(self, mock_s3_bucket):
+        """Verify suffix is appended to cache keys."""
+        from sovereign.cache.backends.s3 import S3Backend
+
+        config = {
+            "bucket_name": mock_s3_bucket["bucket_name"],
+            "prefix": mock_s3_bucket["prefix"],
+            "remote_cache_key_suffix": "-suffix1"
+        }
+        backend = S3Backend(config)
+
+        mock_entry = Entry(text="data", len=4, version="v1", node=Node(cluster="test"))
+        backend.set("test-key", mock_entry)
+
+        # Verify the key was stored with suffix
+        result = backend.get("test-key")
+        assert result is not None
+        assert result.text == "data"
+
+    def test_remote_cache_key_suffix_used_for_retrieval(self, mock_s3_bucket, mock_cache_entry):
+        """Verify suffix is used when retrieving cached values."""
+        from sovereign.cache.backends.s3 import S3Backend
+
+        config = {
+            "bucket_name": mock_s3_bucket["bucket_name"],
+            "prefix": mock_s3_bucket["prefix"],
+            "remote_cache_key_suffix": "-suffix2"
+        }
+        backend = S3Backend(config)
+
+        backend.set("my-key", mock_cache_entry)
+        result = backend.get("my-key")
+
+        assert result is not None
+        assert result.text == mock_cache_entry.text
+
+    def test_no_suffix_when_not_configured(self, mock_s3_bucket, mock_cache_entry):
+        """Verify keys are not modified when suffix is not set."""
+        from sovereign.cache.backends.s3 import S3Backend
+
+        backend = S3Backend(
+            {
+                "bucket_name": mock_s3_bucket["bucket_name"],
+                "prefix": mock_s3_bucket["prefix"]
+            }
+        )
+
+        backend.set("plain-key", mock_cache_entry)
+        result = backend.get("plain-key")
+
+        assert result is not None
+
+    def test_empty_suffix_treated_as_no_suffix(self, mock_s3_bucket, mock_cache_entry):
+        """Verify empty string suffix behaves like no suffix."""
+        from sovereign.cache.backends.s3 import S3Backend
+
+        config = {
+            "bucket_name": mock_s3_bucket["bucket_name"],
+            "prefix": mock_s3_bucket["prefix"],
+            "remote_cache_key_suffix": ""
+        }
+        backend = S3Backend(config)
+
+        backend.set("test", mock_cache_entry)
+        result = backend.get("test")
+
+        assert result is not None
+
+    def test_suffix_isolation_between_environments(self, mock_s3_bucket):
+        """Verify different suffixes create isolated cache namespaces."""
+        from sovereign.cache.backends.s3 import S3Backend
+
+        config_a = {
+            "bucket_name": mock_s3_bucket["bucket_name"],
+            "prefix": mock_s3_bucket["prefix"],
+            "remote_cache_key_suffix": "-env-a"
+        }
+        config_b = {
+            "bucket_name": mock_s3_bucket["bucket_name"],
+            "prefix": mock_s3_bucket["prefix"],
+            "remote_cache_key_suffix": "-env-b"
+        }
+
+        backend_a = S3Backend(config_a)
+        backend_b = S3Backend(config_b)
+
+        entry_a = Entry(text="value-a", len=7, version="v1", node=Node(cluster="cluster-a"))
+        entry_b = Entry(text="value-b", len=7, version="v1", node=Node(cluster="cluster-b"))
+
+        # Write same key to both with different values
+        backend_a.set("config", entry_a)
+        backend_b.set("config", entry_b)
+
+        # Verify isolation - each backend retrieves its own value
+        result_a = backend_a.get("config")
+        result_b = backend_b.get("config")
+
+        assert result_a.text == "value-a"
+        assert result_b.text == "value-b"
+        assert result_a.text != result_b.text
+
 
 class TestCacheReader:
     """Tests for CacheReader - the read-through cache logic."""

@@ -119,7 +119,7 @@ class S3Backend(CacheBackend):
         # noop
         if self.remote_cache_key_suffix:
             encoded_key = quote(f"{key}-{self.remote_cache_key_suffix}", safe="")
-            log.info("Using remote cache key: %s", encoded_key)
+            log.info(f"Using remote cache key: {encoded_key}")
         else:
             encoded_key = quote(key, safe="")
         return f"{self.prefix}/{encoded_key}"

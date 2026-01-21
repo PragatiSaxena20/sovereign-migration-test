@@ -128,7 +128,9 @@ class S3Backend(CacheBackend):
 
             # To prevent stale results from being used, only return objects last modified within the stale threshold
             last_modified = response['LastModified']
+            log.info(f"Last modified time: {last_modified} for {key}")
             time_threshold = datetime.now(timezone.utc) - timedelta(minutes=self.stale_threshold)
+            log.info(f"Time threshold: {time_threshold} for {key}")
 
             if last_modified < time_threshold:
                 log.warning(f"{key} is older than {self.stale_threshold} minutes (last modified: {last_modified})")

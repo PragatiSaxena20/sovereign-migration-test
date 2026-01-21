@@ -91,6 +91,7 @@ class S3Backend(CacheBackend):
         self.prefix = config.get("prefix", "sovereign-cache")
         self.registration_prefix = config.get("registration_prefix", "registrations-")
         self.role = config.get("assume_role")
+        self.stale_threshold = config.get("stale_threshold", 24 * 60)  # default 24 hours
 
         client_args: dict[str, Any] = {}
         if endpoint_url := config.get("endpoint_url"):
@@ -124,6 +125,15 @@ class S3Backend(CacheBackend):
             response = self.s3.get_object(
                 Bucket=self.bucket_name, Key=self._make_key(key)
             )
+
+            # To prevent stale results from being used, only return objects last modified within the stale threshold
+            last_modified = response['LastModified']
+            time_threshold = datetime.now(timezone.utc) - timedelta(minutes=self.stale_threshold)
+
+            if last_modified < time_threshold:
+                log.warning(f"{key} is older than {self.stale_threshold} minutes (last modified: {last_modified})")
+                return None
+
             data = response["Body"].read()
             unpickled = pickle.loads(data)
             log.debug(f"Successfully obtained object {key} from bucket")

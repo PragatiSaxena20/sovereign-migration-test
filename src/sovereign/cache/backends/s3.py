@@ -91,7 +91,9 @@ class S3Backend(CacheBackend):
         self.prefix = config.get("prefix", "sovereign-cache")
         self.registration_prefix = config.get("registration_prefix", "registrations-")
         self.role = config.get("assume_role")
-        self.stale_threshold = config.get("stale_threshold", 24 * 60)  # default 24 hours
+        self.stale_threshold = config.get(
+            "stale_threshold", 24 * 60
+        )  # default 24 hours
 
         client_args: dict[str, Any] = {}
         if endpoint_url := config.get("endpoint_url"):
@@ -127,13 +129,17 @@ class S3Backend(CacheBackend):
             )
 
             # To prevent stale results from being used, only return objects last modified within the stale threshold
-            last_modified = response['LastModified']
+            last_modified = response["LastModified"]
             log.info(f"Last modified time: {last_modified} for {key}")
-            time_threshold = datetime.now(timezone.utc) - timedelta(minutes=self.stale_threshold)
+            time_threshold = datetime.now(timezone.utc) - timedelta(
+                minutes=self.stale_threshold
+            )
             log.info(f"Time threshold: {time_threshold} for {key}")
 
             if last_modified < time_threshold:
-                log.warning(f"{key} is older than {self.stale_threshold} minutes (last modified: {last_modified})")
+                log.warning(
+                    f"{key} is older than {self.stale_threshold} minutes (last modified: {last_modified})"
+                )
                 return None
 
             data = response["Body"].read()

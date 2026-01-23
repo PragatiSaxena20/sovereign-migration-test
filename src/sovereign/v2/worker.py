@@ -19,7 +19,7 @@ from sovereign.v2.data.utils import get_data_store, get_queue
 from sovereign.v2.data.worker_queue import QueueProtocol
 from sovereign.v2.jobs.refresh_context import get_refresh_after, refresh_context
 from sovereign.v2.jobs.render_discovery_job import render_discovery_response
-from sovereign.v2.logging import get_named_logger
+from sovereign.v2.logging import capture_exception, get_named_logger
 from sovereign.v2.types import (
     QueueJob,
     RefreshContextJob,
@@ -89,9 +89,10 @@ class Worker:
                     stats.increment(
                         "v2.worker.queue.message_acked", tags=[f"job_type:{job_type}"]
                     )
-            except Exception:
+            except Exception as e:
                 stats.increment("v2.worker.queue.error")
                 job_logger.exception("Error while processing job")
+                capture_exception(e)
 
     def process_job(self, job: QueueJob):
         self.logger.info(
@@ -212,7 +213,8 @@ class Worker:
                         )
 
                 time.sleep(1)
-            except Exception:
+            except Exception as e:
                 stats.increment("v2.worker.context_refresh.error")
                 self.logger.exception("Error while refreshing context")
+                capture_exception(e)
                 time.sleep(5)

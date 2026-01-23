@@ -15,7 +15,7 @@ from sovereign.dynamic_config import Loadable
 from sovereign.utils.timer import wait_until
 from sovereign.v2.data.repositories import ContextRepository, DiscoveryEntryRepository
 from sovereign.v2.data.worker_queue import QueueProtocol
-from sovereign.v2.logging import get_named_logger
+from sovereign.v2.logging import capture_exception, get_named_logger
 from sovereign.v2.types import Context, RenderDiscoveryJob
 
 
@@ -80,12 +80,13 @@ def refresh_context(
                         context=name,
                     )
                     queue.put(RenderDiscoveryJob(request_hash=request_hash))
-        except Exception:
+        except Exception as e:
             # if loadable.retry_policy is not None:
             # print(loadable.retry_policy)
             # todo: handle exceptions/retries
             # todo: use the default retry logic instead
             logger.exception("Failed to load context")
+            capture_exception(e)
 
 
 def _get_hash(value: Any) -> int:

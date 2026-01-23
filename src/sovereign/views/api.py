@@ -76,6 +76,7 @@ async def resource(
     if content := getattr(entry, "text", None):
         return Response(content, media_type="application/json")
     else:
+        # entry is None, content is None, or content is []
         return Response(
             json.dumps({"title": "No resources found", "status": 404}),
             media_type="application/json+problem",

@@ -8,7 +8,7 @@ from typing import Protocol, runtime_checkable
 from structlog.typing import FilteringBoundLogger
 
 from sovereign import config
-from sovereign.v2.logging import get_named_logger
+from sovereign.v2.logging import capture_exception, get_named_logger
 from sovereign.v2.types import QueueJob, queue_job_type_adapter
 
 if config.worker_v2_queue_invsibility_time is None:
@@ -176,8 +176,9 @@ class SqliteQueue(QueueProtocol):
                     "CREATE INDEX IF NOT EXISTS idx_receipt_handle ON queue (receipt_handle)"
                 )
                 conn.commit()
-        except Exception:
+        except Exception as e:
             self.logger.exception("Failed to initialise SQLite queue database")
+            capture_exception(e)
             raise
 
     def put(self, job: QueueJob) -> str | None:
@@ -190,8 +191,9 @@ class SqliteQueue(QueueProtocol):
                 job_id = str(cursor.lastrowid)
                 self.logger.debug("Put job in SQLite queue", job=job, job_id=job_id)
                 return str(job_id)
-        except Exception:
+        except Exception as e:
             self.logger.exception("Failed to put job in SQLite queue", job=job)
+            capture_exception(e)
             return None
 
     def get(self) -> QueueMessage | None:
@@ -231,8 +233,9 @@ class SqliteQueue(QueueProtocol):
                         )
                         job = queue_job_type_adapter.validate_json(row["data"])
                         return QueueMessage(job=job, receipt_handle=receipt_handle)
-            except Exception:
+            except Exception as e:
                 self.logger.exception("Failed to get job from SQLite queue")
+                capture_exception(e)
                 return None
 
             time.sleep(poll_interval_seconds)
@@ -265,9 +268,10 @@ class SqliteQueue(QueueProtocol):
                         receipt_handle=receipt_handle,
                     )
                     return False
-        except Exception:
+        except Exception as e:
             self.logger.exception(
                 "Failed to acknowledge job in SQLite queue",
                 receipt_handle=receipt_handle,
             )
+            capture_exception(e)
             return False

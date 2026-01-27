@@ -60,7 +60,7 @@ class WorkerNodeRepository:
 
     @stats.timed("v2.repository.worker_node.heartbeat_ms")
     def send_heartbeat(self, node_id: str) -> bool:
-        now = int(time.time())
+        now = int(time.monotonic())
         return self.data_store.set(
             DataType.WorkerNode,
             node_id,
@@ -81,7 +81,7 @@ class WorkerNodeRepository:
         """
         Remove any nodes that have not sent a heartbeat in the last 10 minutes.
         """
-        now = int(time.time())
+        now = int(time.monotonic())
         return self.data_store.delete_matching(
             DataType.WorkerNode,
             "last_heartbeat",

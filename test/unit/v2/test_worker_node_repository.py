@@ -28,14 +28,14 @@ def test_get_leader(
     data_store.set(
         DataType.WorkerNode,
         "ZZZ not leader",
-        WorkerNode(node_id="ZZZ not leader", last_heartbeat=int(time.time())),
+        WorkerNode(node_id="ZZZ not leader", last_heartbeat=int(time.monotonic())),
     )
 
     # add a node not to be pruned
     data_store.set(
         DataType.WorkerNode,
         "AAA leader",
-        WorkerNode(node_id="AAA leader", last_heartbeat=int(time.time())),
+        WorkerNode(node_id="AAA leader", last_heartbeat=int(time.monotonic())),
     )
 
     leader_node_id = worker_node_repository.get_leader_node_id()
@@ -56,7 +56,8 @@ def test_prune(
         "dead_node_id",
         WorkerNode(
             node_id="dead_node_id",
-            last_heartbeat=int(time.time()) - 700,  # 11 minutes ago to force pruning
+            last_heartbeat=int(time.monotonic())
+            - 700,  # 11 minutes ago to force pruning
         ),
     )
 
@@ -66,7 +67,7 @@ def test_prune(
         "alive_node_id",
         WorkerNode(
             node_id="alive_node_id",
-            last_heartbeat=int(time.time()) - 60,  # 1 minute ago to force keeping
+            last_heartbeat=int(time.monotonic()) - 60,  # 1 minute ago to force keeping
         ),
     )
 

@@ -599,16 +599,18 @@ class SqliteDataStore(DataStoreProtocol):
             )
             return False
 
-        sql = f"UPDATE {table} SET {property_column} = ? WHERE {primary_key_column} = ?"
+        sql = f"""
+            INSERT INTO {table} ({primary_key_column}, {property_column})
+            VALUES (?, ?)
+            ON CONFLICT({primary_key_column}) DO UPDATE SET {property_column} = excluded.{property_column}
+        """
 
         conn = self._get_connection()
 
         try:
             cursor = conn.cursor()
-            cursor.execute(sql, (property_value, key))
+            cursor.execute(sql, (key, property_value))
             conn.commit()
-            if cursor.rowcount == 0:
-                return False
             return True
         except (sqlite3.Error, ValueError):
             self.logger.exception(

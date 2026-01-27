@@ -56,7 +56,7 @@ def refresh_context(
                     name=name,
                     data=value,
                     data_hash=new_hash,
-                    last_refreshed_at=int(time.time()),
+                    last_refreshed_at=int(time.monotonic()),
                     refresh_after=get_refresh_after(config, loadable),
                 )
                 context_repository.save(context)

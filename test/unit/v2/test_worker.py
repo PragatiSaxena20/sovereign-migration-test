@@ -133,7 +133,7 @@ def test_leader_skips_context_not_due_for_refresh(
     # return a timestamp in the future so it's not ready for a refresh yet
     # noinspection PyUnusedLocal
     def get_refresh_after_in_future(name):
-        return int(time.time() + 1000)
+        return int(time.monotonic() + 1000)
 
     mock_loadable = MagicMock()
     with (
@@ -172,7 +172,7 @@ def test_leader_skips_context_when_due(
     # return a timestamp in the past to indicate that it's ready for a refresh immediately
     # noinspection PyUnusedLocal
     def get_refresh_after_in_past(name):
-        return int(time.time() - 100)
+        return int(time.monotonic() - 100)
 
     mock_loadable = MagicMock()
     with (

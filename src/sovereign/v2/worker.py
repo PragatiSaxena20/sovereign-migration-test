@@ -164,13 +164,13 @@ class Worker:
                         self.context_repository.get_refresh_after(name)
                     )
 
-                    time_now = time.time()
+                    time_now = int(time.monotonic())
 
                     # if the context in the database says it's due for a refresh
                     # - put a job on the queue
                     # - and then calculate the next time it should be refreshed and save that in the database
 
-                    if refresh_after is None or refresh_after <= time.time():
+                    if refresh_after is None or refresh_after < time_now:
                         job = RefreshContextJob(context_name=name)
 
                         self.queue.put(job)
@@ -185,7 +185,7 @@ class Worker:
                         )
 
                         self.logger.info(
-                            "Queuing context refresh",
+                            "Queued context refresh",
                             node_id=self.node_id,
                             process_id=os.getpid(),
                             thread_id=threading.get_ident(),

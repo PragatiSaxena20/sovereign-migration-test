@@ -88,3 +88,16 @@ class WorkerNodeRepository:
             ComparisonOperator.LessThanOrEqualTo,
             now - 600,
         )
+
+    @stats.timed("v2.repository.worker_node.count_active_ms")
+    def count_active_nodes(self) -> int:
+        """
+        Count nodes that have sent a heartbeat in the last 10 minutes.
+        """
+        now = int(time.time())
+        return self.data_store.count_matching(
+            DataType.WorkerNode,
+            "last_heartbeat",
+            ComparisonOperator.GreaterThan,
+            now - 600,
+        )

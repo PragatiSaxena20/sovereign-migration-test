@@ -15,6 +15,7 @@ from sovereign.v2.types import Context, DiscoveryEntry, WorkerNode
 class ComparisonOperator(StrEnum):
     EqualTo = "equal_to"
     LessThanOrEqualTo = "less_than_or_equal_to"
+    GreaterThan = "greater_than"
 
 
 class DataType(StrEnum):
@@ -24,6 +25,13 @@ class DataType(StrEnum):
 
 
 class DataStoreProtocol(Protocol):
+    def count_matching(
+        self,
+        data_type: DataType,
+        property_name: str,
+        comparison_operator: ComparisonOperator,
+        property_value: Any,
+    ) -> int: ...
     def delete_matching(
         self,
         data_type: DataType,
@@ -87,7 +95,25 @@ class InMemoryDataStore(DataStoreProtocol):
             return left == right
         elif operator == ComparisonOperator.LessThanOrEqualTo:
             return left <= right
+        elif operator == ComparisonOperator.GreaterThan:
+            return left > right
         return False
+
+    def count_matching(
+        self,
+        data_type: DataType,
+        property_name: str,
+        comparison_operator: ComparisonOperator,
+        property_value: Any,
+    ) -> int:
+        store: dict[str, Any] = self.stores[data_type]
+        return sum(
+            1
+            for item in store.values()
+            if self._compare(
+                getattr(item, property_name), comparison_operator, property_value
+            )
+        )
 
     def delete_matching(
         self,
@@ -253,6 +279,8 @@ class SqliteDataStore(DataStoreProtocol):
             return "="
         elif operator == ComparisonOperator.LessThanOrEqualTo:
             return "<="
+        elif operator == ComparisonOperator.GreaterThan:
+            return ">"
         raise ValueError(f"Unsupported comparison operator: {operator}")
 
     @staticmethod
@@ -348,6 +376,44 @@ class SqliteDataStore(DataStoreProtocol):
             return None
 
         return column_name
+
+    def count_matching(
+        self,
+        data_type: DataType,
+        property_name: str,
+        comparison_operator: ComparisonOperator,
+        property_value: Any,
+    ) -> int:
+        column = self._validate_column(data_type, property_name)
+
+        if column is None:
+            self.logger.error(
+                "Cannot count matching, invalid column name",
+                data_type=data_type,
+                column=property_name,
+            )
+            return 0
+
+        operator = self._get_operator_sql(comparison_operator)
+        table = self._get_table_name(data_type)
+        sql = f"SELECT COUNT(*) FROM {table} WHERE {column} {operator} ?"
+
+        conn = self._get_connection()
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, (property_value,))
+            row = cursor.fetchone()
+            return row[0] if row else 0
+        except (sqlite3.Error, ValueError):
+            self.logger.exception(
+                "Error counting matching records",
+                data_type=data_type,
+                column=property_name,
+                operator=comparison_operator,
+                value=property_value,
+            )
+            return 0
 
     def delete_matching(
         self,

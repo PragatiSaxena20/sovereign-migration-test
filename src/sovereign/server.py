@@ -97,8 +97,9 @@ def write_supervisor_conf() -> Path:
 
     conf["program:data"] = worker = {
         **base,
-        "numprocs": "1",
-        "command": "nice -n 2 sovereign-worker",  # run worker with reduced CPU priority (higher niceness value)
+        "numprocs": "4",
+        "command": "sovereign-worker",  # run worker with reduced CPU priority (higher niceness value)
+        "process_name": "sovereign-worker-%(process_num)",
     }
 
     if user := asgi_config.user:

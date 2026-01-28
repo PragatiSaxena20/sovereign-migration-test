@@ -48,7 +48,7 @@ class Worker:
         self.node_id = (
             node_id
             if node_id is not None
-            else f"{time.time()}{random.randint(0, 1000000)}"
+            else f"{time.time()}{os.getpid()}{random.randint(0, 1000000)}"
         )
 
         data_store = data_store if data_store is not None else get_data_store()

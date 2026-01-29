@@ -21,6 +21,7 @@ class DiscoveryEntry(pydantic.BaseModel):
     request: DiscoveryRequest
     response: DiscoveryResponse | None
     last_rendered_at: int | None = None
+    rendering_started_at: int | None = None
 
 
 class RefreshContextJob(pydantic.BaseModel):

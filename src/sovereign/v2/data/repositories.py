@@ -39,6 +39,23 @@ class DiscoveryEntryRepository:
     def get(self, request_hash: str) -> DiscoveryEntry | None:
         return self.data_store.get(DataType.DiscoveryEntry, request_hash)
 
+    @stats.timed("v2.repository.discovery_entry.get_rendering_started_at_ms")
+    def get_rendering_started_at(self, request_hash: str) -> int | None:
+        return self.data_store.get_property(
+            DataType.DiscoveryEntry, request_hash, "rendering_started_at"
+        )
+
+    @stats.timed("v2.repository.discovery_entry.set_rendering_started_at_ms")
+    def set_rendering_started_at(
+        self, request_hash: str, rendering_started_at: int
+    ) -> bool:
+        return self.data_store.set_property(
+            DataType.DiscoveryEntry,
+            request_hash,
+            "rendering_started_at",
+            rendering_started_at,
+        )
+
     @stats.timed("v2.repository.discovery_entry.find_by_template_ms")
     def find_all_request_hashes_by_template(self, template: str) -> list[str]:
         return self.data_store.find_all_matching_property(

@@ -24,7 +24,7 @@ def render_discovery_response(
     context_repository: ContextRepository,
     discovery_entry_repository: DiscoveryEntryRepository,
     node_id: str,
-):
+) -> bool:
     logger: FilteringBoundLogger = get_named_logger(
         f"{__name__}.{render_discovery_response.__qualname__} ({__file__})",
         level=logging.DEBUG,
@@ -35,6 +35,10 @@ def render_discovery_response(
         thread_id=threading.get_ident(),
     )
 
+    # Maximum time (in seconds) to consider a rendering job as still in progress
+    # If rendering_started_at is within this window and no response exists, skip this job
+    rendering_timeout_seconds = 600  # 10 minutes
+
     try:
         logger.debug("Starting rendering of discovery response")
 
@@ -43,6 +47,31 @@ def render_discovery_response(
         if discovery_entry is None:
             logger.error("No discovery entry found for request hash")
             return True  # don't retry this job, it won't succeed
+
+        # Check if another job is already rendering this request
+        # If rendering_started_at is set recently and there's no response yet, skip this duplicate job
+        now = int(time.time())
+        if (
+            discovery_entry.rendering_started_at is not None
+            and discovery_entry.response is None
+            and (now - discovery_entry.rendering_started_at) < rendering_timeout_seconds
+        ):
+            logger.info(
+                "Skipping duplicate rendering job - another job is already rendering this request",
+                rendering_started_at=discovery_entry.rendering_started_at,
+                seconds_ago=now - discovery_entry.rendering_started_at,
+            )
+            stats.increment(
+                "v2.worker.job.render_discovery_response.skipped",
+                tags=[
+                    "reason:already_rendering",
+                    f"template:{discovery_entry.template}",
+                ],
+            )
+            return True  # don't retry, another job is handling it
+
+        # Mark this request as being rendered to prevent duplicate jobs
+        discovery_entry_repository.set_rendering_started_at(request_hash, now)
 
         request = discovery_entry.request
 
@@ -87,7 +116,16 @@ def render_discovery_response(
                     and latest_context_refresh < discovery_entry.last_rendered_at
                 ):
                     # the template was last rendered after all the contexts were refreshed, so we can skip rendering
-                    logger.info("Skipping rendering for duplicate job")
+                    logger.info(
+                        "Skipping rendering for duplicate job - template already up to date"
+                    )
+                    stats.increment(
+                        "v2.worker.job.render_discovery_response.skipped",
+                        tags=[
+                            "reason:already_up_to_date",
+                            f"template:{discovery_entry.template}",
+                        ],
+                    )
                     return True
 
             raw_contexts = {
@@ -138,8 +176,12 @@ def render_discovery_response(
                     request=request,
                     response=response,
                     last_rendered_at=int(time.time()),
+                    rendering_started_at=None,  # Reset after successful rendering
                 )
             ):
                 logger.error("Failed to save discovery entry")
+                return False
+
+            return True
     finally:
         logger.debug("Finished rendering of discovery response")

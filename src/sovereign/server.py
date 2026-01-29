@@ -99,7 +99,7 @@ def write_supervisor_conf() -> Path:
     if config.worker_v2_enabled:
         conf["program:data"] = worker = {
             **base,
-            "numprocs": str(multiprocessing.cpu_count() - 1),
+            "numprocs": str(max(1, multiprocessing.cpu_count() - 1)),
             "command": "sovereign-worker",  # run worker with reduced CPU priority (higher niceness value)
             "process_name": "sovereign-worker-%(process_num)s",
         }

@@ -84,7 +84,7 @@ class Worker:
 
                     job_logger = job_logger.bind(job_type=job_type, job=message.job)
 
-                    self.process_job(message.job)
+                    should_ack = self.process_job(message.job)
 
                     # Emit metric for queue-to-completion time
                     queue_to_completion_time_ms = (
@@ -96,16 +96,32 @@ class Worker:
                         tags=[f"job_type:{job_type}"],
                     )
 
-                    self.queue.ack(message.receipt_handle)
-                    stats.increment(
-                        "v2.worker.queue.message_acked", tags=[f"job_type:{job_type}"]
-                    )
+                    if should_ack:
+                        self.queue.ack(message.receipt_handle)
+                        stats.increment(
+                            "v2.worker.queue.message_acked",
+                            tags=[f"job_type:{job_type}"],
+                        )
+                    else:
+                        job_logger.warning(
+                            "Job processing returned False, not acknowledging - job will be retried after visibility timeout"
+                        )
+                        stats.increment(
+                            "v2.worker.queue.message_not_acked",
+                            tags=[f"job_type:{job_type}"],
+                        )
             except Exception as e:
                 stats.increment("v2.worker.queue.error")
                 job_logger.exception("Error while processing job")
                 capture_exception(e)
 
-    def process_job(self, job: QueueJob):
+    def process_job(self, job: QueueJob) -> bool:
+        """
+        Process a job from the queue.
+
+        Returns True if the job was successfully processed and should be acknowledged.
+        Returns False if the job should be retried (e.g., missing contexts).
+        """
         logger = self.logger.bind(
             job_type=type(job),
             job=job,
@@ -127,11 +143,12 @@ class Worker:
                     self.discovery_entry_repository,
                     self.queue,
                 )
+                return True
             case RenderDiscoveryJob():
                 logger = logger.bind(request_hash=job.request_hash)
                 logger.info("Processing job from queue")
 
-                render_discovery_response(
+                return render_discovery_response(
                     job.request_hash,
                     self.context_repository,
                     self.discovery_entry_repository,

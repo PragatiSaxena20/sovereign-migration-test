@@ -79,33 +79,43 @@ async def deep_check(
     ] = "*",
 ) -> Response:
     result = DeepCheckResult()
-    for template in list(XDS_TEMPLATES["default"].keys()):
-        discovery_request = mock_discovery_request(
-            "v3",
-            template,
-            expressions=[f"cluster={envoy_service_cluster}"],
-        )
 
-        if config.worker_v2_enabled:
-            # we're set up to use v2 of the worker
+    templates = list(XDS_TEMPLATES["default"].keys())
+
+    if config.worker_v2_enabled:
+        # Run all template checks in parallel to avoid the deep check taking too long
+        async def check_template(template: str) -> tuple[str, CheckResult]:
+            discovery_request = mock_discovery_request(
+                "v3",
+                template,
+                expressions=[f"cluster={envoy_service_cluster}"],
+            )
             response = await wait_for_discovery_response(discovery_request)
             if response:
-                result.templates[template] = "OK"
+                return template, "OK"
             else:
-                result.templates[template] = (
-                    "FAIL",
-                    f"Failed to render {template}",
-                )
+                return template, ("FAIL", f"Failed to render {template}")
 
-            result.worker = "OK"
-        else:
+        check_results = await asyncio.gather(
+            *[check_template(template) for template in templates]
+        )
+        for template, check_result in check_results:
+            result.templates[template] = check_result
+
+        result.worker = "OK"
+    else:
+        for template in templates:
+            discovery_request = mock_discovery_request(
+                "v3",
+                template,
+                expressions=[f"cluster={envoy_service_cluster}"],
+            )
             try:
                 _ = await reader.blocking_read(discovery_request)  # ty: ignore[possibly-missing-attribute]
                 result.templates[template] = "OK"
             except Exception as e:
                 result.templates[template] = ("FAIL", f"Failed {template}: {str(e)}")
 
-    if not config.worker_v2_enabled:
         for attempt in range(worker_attempts):
             try:
                 worker_health = requests.get("http://localhost:9080/health")

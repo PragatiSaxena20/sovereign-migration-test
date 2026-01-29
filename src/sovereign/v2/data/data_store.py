@@ -237,7 +237,8 @@ class SqliteDataStore(DataStoreProtocol):
             template TEXT,
             request TEXT,
             response TEXT,
-            last_rendered_at INTEGER
+            last_rendered_at INTEGER,
+            rendering_started_at INTEGER
         )
         """)
 
@@ -301,6 +302,13 @@ class SqliteDataStore(DataStoreProtocol):
     def _row_to_object(data_type: DataType, row: sqlite3.Row) -> Any:
         match data_type:
             case DataType.Context:
+                # Check for required fields - partial rows from set_property may have NULLs
+                if (
+                    row["data"] is None
+                    or row["data_hash"] is None
+                    or row["refresh_after"] is None
+                ):
+                    return None
                 return Context(
                     name=row["name"],
                     data=pickle.loads(row["data"]),
@@ -317,6 +325,7 @@ class SqliteDataStore(DataStoreProtocol):
                     if row["response"] is not None
                     else None,
                     last_rendered_at=row["last_rendered_at"],
+                    rendering_started_at=row["rendering_started_at"],
                 )
             case DataType.WorkerNode:
                 return WorkerNode(
@@ -348,6 +357,7 @@ class SqliteDataStore(DataStoreProtocol):
                 if obj.response is not None
                 else None,
                 "last_rendered_at": obj.last_rendered_at,
+                "rendering_started_at": obj.rendering_started_at,
             }
         elif isinstance(obj, WorkerNode):
             return {
@@ -372,6 +382,7 @@ class SqliteDataStore(DataStoreProtocol):
                 "request",
                 "response",
                 "last_rendered_at",
+                "rendering_started_at",
             },
             DataType.WorkerNode: {"node_id", "last_heartbeat"},
         }

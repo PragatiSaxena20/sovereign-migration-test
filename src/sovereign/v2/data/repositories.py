@@ -2,7 +2,7 @@ import time
 
 from sovereign import stats
 from sovereign.v2.data.data_store import ComparisonOperator, DataStoreProtocol, DataType
-from sovereign.v2.types import Context, DiscoveryEntry, WorkerNode
+from sovereign.v2.types import Context, ContextHistoryEntry, DiscoveryEntry, WorkerNode
 
 
 class ContextRepository:
@@ -29,6 +29,21 @@ class ContextRepository:
         return self.data_store.set_property(
             DataType.Context, name, "refresh_after", refresh_after
         )
+
+
+class ContextHistoryRepository:
+    def __init__(self, data_store: DataStoreProtocol):
+        self.data_store: DataStoreProtocol = data_store
+
+    @stats.timed("v2.repository.context_history.add_ms")
+    def add(self, entry: ContextHistoryEntry) -> bool:
+        return self.data_store.add_context_history(entry)
+
+    @stats.timed("v2.repository.context_history.get_history_ms")
+    def get_history(
+        self, context_name: str, limit: int = 10
+    ) -> list[ContextHistoryEntry]:
+        return self.data_store.get_context_history(context_name, limit)
 
 
 class DiscoveryEntryRepository:

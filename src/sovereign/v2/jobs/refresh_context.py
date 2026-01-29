@@ -13,10 +13,14 @@ from sovereign.configuration import SovereignConfigv2
 from sovereign.context import CronInterval, SecondsInterval, TaskInterval, stats
 from sovereign.dynamic_config import Loadable
 from sovereign.utils.timer import wait_until
-from sovereign.v2.data.repositories import ContextRepository, DiscoveryEntryRepository
+from sovereign.v2.data.repositories import (
+    ContextHistoryRepository,
+    ContextRepository,
+    DiscoveryEntryRepository,
+)
 from sovereign.v2.data.worker_queue import QueueProtocol
 from sovereign.v2.logging import capture_exception, get_named_logger
-from sovereign.v2.types import Context, RenderDiscoveryJob
+from sovereign.v2.types import Context, ContextHistoryEntry, RenderDiscoveryJob
 
 
 def refresh_context(
@@ -26,6 +30,7 @@ def refresh_context(
     context_repository: ContextRepository,
     discovery_job_repository: DiscoveryEntryRepository,
     queue: QueueProtocol,
+    context_history_repository: ContextHistoryRepository | None = None,
 ):
     with stats.timed("v2.worker.job.refresh_context_ms", tags=[f"context:{name}"]):
         loadable = config.template_context.context[name]
@@ -60,6 +65,17 @@ def refresh_context(
                     refresh_after=get_refresh_after(config, loadable),
                 )
                 context_repository.save(context)
+
+                # Save to context history
+                if context_history_repository is not None:
+                    history_entry = ContextHistoryEntry(
+                        context_name=name,
+                        created_at=int(time.time()),
+                        data=value,
+                        data_hash=new_hash,
+                    )
+                    context_history_repository.add(history_entry)
+                    logger.debug("Saved context history entry", context_name=name)
 
                 request_hashes: set[str] = set()
 

@@ -12,7 +12,7 @@ from sovereign.error_info import ErrorInfo
 from sovereign.middlewares import LoggingMiddleware, RequestContextLogMiddleware
 from sovereign.response_class import json_response_class
 from sovereign.utils.resources import get_package_file
-from sovereign.views import api, crypto, discovery, healthchecks, interface
+from sovereign.views import api, contexts, crypto, discovery, healthchecks, interface
 
 Router = namedtuple("Router", "module tags prefix")
 
@@ -54,6 +54,7 @@ def init_app() -> FastAPI:
     routers = (
         Router(discovery.router, ["Configuration Discovery"], ""),
         Router(api.router, ["API"], "/api"),
+        Router(contexts.router, ["Context History"], "/api/contexts"),
         Router(healthchecks.router, ["Healthchecks"], ""),
         Router(interface.router, ["User Interface"], "/ui"),
         Router(crypto.router, ["Cryptographic Utilities"], "/crypto"),

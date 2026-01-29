@@ -42,3 +42,10 @@ queue_job_type_adapter = TypeAdapter(QueueJob)
 class WorkerNode(pydantic.BaseModel):
     node_id: str
     last_heartbeat: int
+
+
+class ContextHistoryEntry(pydantic.BaseModel):
+    context_name: str
+    created_at: int  # Unix timestamp when the context was saved
+    data: Any
+    data_hash: int

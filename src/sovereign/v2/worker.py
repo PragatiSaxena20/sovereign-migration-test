@@ -11,6 +11,7 @@ from sovereign.configuration import config
 from sovereign.dynamic_config import Loadable
 from sovereign.v2.data.data_store import DataStoreProtocol
 from sovereign.v2.data.repositories import (
+    ContextHistoryRepository,
     ContextRepository,
     DiscoveryEntryRepository,
     WorkerNodeRepository,
@@ -29,6 +30,7 @@ from sovereign.v2.types import (
 
 class Worker:
     context_repository: ContextRepository
+    context_history_repository: ContextHistoryRepository
     discovery_entry_repository: DiscoveryEntryRepository
     worker_node_repository: WorkerNodeRepository
 
@@ -54,6 +56,7 @@ class Worker:
         data_store = data_store if data_store is not None else get_data_store()
 
         self.context_repository = ContextRepository(data_store)
+        self.context_history_repository = ContextHistoryRepository(data_store)
         self.discovery_entry_repository = DiscoveryEntryRepository(data_store)
         self.worker_node_repository = WorkerNodeRepository(data_store)
 
@@ -126,6 +129,7 @@ class Worker:
                     self.context_repository,
                     self.discovery_entry_repository,
                     self.queue,
+                    self.context_history_repository,
                 )
             case RenderDiscoveryJob():
                 logger = logger.bind(request_hash=job.request_hash)

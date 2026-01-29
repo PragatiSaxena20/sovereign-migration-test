@@ -97,7 +97,7 @@ def write_supervisor_conf() -> Path:
 
     conf["program:data"] = worker = {
         **base,
-        "numprocs": "4",
+        "numprocs": "7",
         "command": "sovereign-worker",  # run worker with reduced CPU priority (higher niceness value)
         "process_name": "sovereign-worker-%(process_num)s",
     }

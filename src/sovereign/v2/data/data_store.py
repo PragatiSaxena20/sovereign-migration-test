@@ -1,6 +1,7 @@
 import logging
 import pickle
 import sqlite3
+from collections import deque
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -9,7 +10,7 @@ from structlog.typing import FilteringBoundLogger
 from sovereign import config
 from sovereign.types import DiscoveryRequest, DiscoveryResponse
 from sovereign.v2.logging import get_named_logger
-from sovereign.v2.types import Context, DiscoveryEntry, WorkerNode
+from sovereign.v2.types import Context, ContextHistoryEntry, DiscoveryEntry, WorkerNode
 
 
 class ComparisonOperator(StrEnum):
@@ -20,11 +21,13 @@ class ComparisonOperator(StrEnum):
 
 class DataType(StrEnum):
     Context = "context"
+    ContextHistory = "context_history"
     DiscoveryEntry = "discovery_request"
     WorkerNode = "worker_node"
 
 
 class DataStoreProtocol(Protocol):
+    def add_context_history(self, entry: ContextHistoryEntry) -> bool: ...
     def count_matching(
         self,
         data_type: DataType,
@@ -62,6 +65,9 @@ class DataStoreProtocol(Protocol):
         ...
 
     def get(self, data_type: DataType, key: str) -> Any | None: ...
+    def get_context_history(
+        self, context_name: str, limit: int = 10
+    ) -> list[ContextHistoryEntry]: ...
     def get_property(
         self, data_type: DataType, key: str, property_name: str
     ) -> Any | None: ...
@@ -77,6 +83,8 @@ class DataStoreProtocol(Protocol):
 
 
 class InMemoryDataStore(DataStoreProtocol):
+    MAX_HISTORY_ENTRIES = 10
+
     def __init__(self):
         self.logger: FilteringBoundLogger = get_named_logger(
             f"{self.__class__.__module__}.{self.__class__.__qualname__}",
@@ -88,6 +96,9 @@ class InMemoryDataStore(DataStoreProtocol):
             DataType.DiscoveryEntry: dict[str, DiscoveryEntry](),
             DataType.WorkerNode: dict[str, WorkerNode](),
         }
+
+        # Bounded deque per context name to limit memory usage
+        self.context_history: dict[str, deque[ContextHistoryEntry]] = {}
 
     @staticmethod
     def _compare(left: Any, operator: ComparisonOperator, right: Any) -> bool:
@@ -206,6 +217,21 @@ class InMemoryDataStore(DataStoreProtocol):
         setattr(item, property_name, property_value)
         return True
 
+    def add_context_history(self, entry: ContextHistoryEntry) -> bool:
+        context_name = entry.context_name
+        if context_name not in self.context_history:
+            self.context_history[context_name] = deque(maxlen=self.MAX_HISTORY_ENTRIES)
+        self.context_history[context_name].appendleft(entry)
+        return True
+
+    def get_context_history(
+        self, context_name: str, limit: int = 10
+    ) -> list[ContextHistoryEntry]:
+        if context_name not in self.context_history:
+            return []
+        history = list(self.context_history[context_name])
+        return history[:limit]
+
 
 class SqliteDataStore(DataStoreProtocol):
     def __init__(self):
@@ -248,6 +274,21 @@ class SqliteDataStore(DataStoreProtocol):
         )
         """)
 
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS context_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            context_name TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            data BLOB NOT NULL,
+            data_hash INTEGER NOT NULL
+        )
+        """)
+
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_context_history_name_created_at 
+        ON context_history (context_name, created_at DESC)
+        """)
+
         conn.commit()
 
     def _get_connection(self):
@@ -268,10 +309,14 @@ class SqliteDataStore(DataStoreProtocol):
         match data_type:
             case DataType.Context:
                 return "name"
+            case DataType.ContextHistory:
+                return "id"
             case DataType.DiscoveryEntry:
                 return "request_hash"
             case DataType.WorkerNode:
                 return "node_id"
+            case _:
+                raise ValueError(f"Unsupported data type: {data_type}")
 
     @staticmethod
     def _get_operator_sql(operator: ComparisonOperator) -> str:
@@ -288,10 +333,14 @@ class SqliteDataStore(DataStoreProtocol):
         match data_type:
             case DataType.Context:
                 return "contexts"
+            case DataType.ContextHistory:
+                return "context_history"
             case DataType.DiscoveryEntry:
                 return "discovery_entries"
             case DataType.WorkerNode:
                 return "worker_nodes"
+            case _:
+                raise ValueError(f"Unsupported data type: {data_type}")
 
     @staticmethod
     def _row_to_object(data_type: DataType, row: sqlite3.Row) -> Any:
@@ -319,6 +368,7 @@ class SqliteDataStore(DataStoreProtocol):
                     node_id=row["node_id"],
                     last_heartbeat=row["last_heartbeat"],
                 )
+        return None
 
     def _object_to_values(self, obj: Any) -> dict[str, Any]:
         if isinstance(obj, Context):
@@ -687,3 +737,78 @@ class SqliteDataStore(DataStoreProtocol):
                 value=property_value,
             )
             return False
+
+    MAX_HISTORY_ENTRIES = 10
+
+    def add_context_history(self, entry: ContextHistoryEntry) -> bool:
+        conn = self._get_connection()
+
+        try:
+            cursor = conn.cursor()
+
+            # Insert the new entry
+            pickled_data = pickle.dumps(entry.data)
+            cursor.execute(
+                """
+                INSERT INTO context_history (context_name, created_at, data, data_hash)
+                VALUES (?, ?, ?, ?)
+                """,
+                (entry.context_name, entry.created_at, pickled_data, entry.data_hash),
+            )
+
+            # Prune old entries, keeping only the most recent MAX_HISTORY_ENTRIES
+            cursor.execute(
+                """
+                DELETE FROM context_history
+                WHERE context_name = ? AND id NOT IN (
+                    SELECT id FROM context_history
+                    WHERE context_name = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                )
+                """,
+                (entry.context_name, entry.context_name, self.MAX_HISTORY_ENTRIES),
+            )
+
+            conn.commit()
+            return True
+        except (sqlite3.Error, ValueError):
+            self.logger.exception(
+                "Error adding context history entry",
+                context_name=entry.context_name,
+            )
+            return False
+
+    def get_context_history(
+        self, context_name: str, limit: int = 10
+    ) -> list[ContextHistoryEntry]:
+        conn = self._get_connection()
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT context_name, created_at, data, data_hash
+                FROM context_history
+                WHERE context_name = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (context_name, limit),
+            )
+            rows = cursor.fetchall()
+            return [
+                ContextHistoryEntry(
+                    context_name=row["context_name"],
+                    created_at=row["created_at"],
+                    data=pickle.loads(row["data"]),
+                    data_hash=row["data_hash"],
+                )
+                for row in rows
+            ]
+        except (sqlite3.Error, ValueError):
+            self.logger.exception(
+                "Error getting context history",
+                context_name=context_name,
+            )
+            return []

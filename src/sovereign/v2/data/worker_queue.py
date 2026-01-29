@@ -7,6 +7,7 @@ from typing import Protocol, runtime_checkable
 
 from structlog.typing import FilteringBoundLogger
 
+
 from sovereign import config
 from sovereign.v2.logging import get_named_logger
 from sovereign.v2.types import QueueJob, queue_job_type_adapter
@@ -43,7 +44,7 @@ class InMemoryQueue(QueueProtocol):
     """
 
     def __init__(
-        self, visibility_timeout: int | None = DEFAULT_VISIBILITY_TIMEOUT_SECONDS
+        self, visibility_timeout: int | None = DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
     ) -> None:
         self.logger: FilteringBoundLogger = get_named_logger(
             f"{self.__class__.__module__}.{self.__class__.__qualname__}",
@@ -110,7 +111,7 @@ class InMemoryQueue(QueueProtocol):
         receipt handle was invalid (message doesn't exist or was redelivered).
         """
         for message_id, (job, invisible_until, stored_receipt) in list(
-            self._messages.items()
+            self._messages.items(),
         ):
             if stored_receipt == receipt_handle:
                 del self._messages[message_id]
@@ -157,7 +158,7 @@ class SqliteQueue(QueueProtocol):
         # isolation_level=None uses autocommit mode,
         # which prevents "cannot commit - no transaction is active" errors in multi-threaded contexts.
         conn = sqlite3.connect(
-            self.db_path, check_same_thread=False, isolation_level=None
+            self.db_path, check_same_thread=False, isolation_level=None,
         )
         conn.row_factory = sqlite3.Row
         return conn
@@ -175,10 +176,10 @@ class SqliteQueue(QueueProtocol):
                              )
                              """)
                 conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_invisible_until ON queue (invisible_until)"
+                    "CREATE INDEX IF NOT EXISTS idx_invisible_until ON queue (invisible_until)",
                 )
                 conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_receipt_handle ON queue (receipt_handle)"
+                    "CREATE INDEX IF NOT EXISTS idx_receipt_handle ON queue (receipt_handle)",
                 )
                 conn.commit()
         except Exception:
@@ -285,4 +286,125 @@ class SqliteQueue(QueueProtocol):
                 return row[0] if row else 0
         except Exception:
             self.logger.exception("Failed to get queue size from SQLite queue")
+            return 0
+
+
+class SqsQueue(QueueProtocol):
+    def __init__(
+        self,
+        queue_url: str | None = None,
+        visibility_timeout: int = DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
+    ):
+        import boto3
+        from botocore.exceptions import ClientError
+
+        self._ClientError = ClientError
+        self.logger: FilteringBoundLogger = get_named_logger(
+            f"{self.__class__.__module__}.{self.__class__.__qualname__}",
+            level=logging.INFO,
+        )
+
+        self.queue_url = queue_url or config.worker_v2_queue_path
+        if not self.queue_url:
+            raise ValueError("SQS queue URL must be provided via config")
+
+        self.visibility_timeout = visibility_timeout
+        self.sqs = boto3.client("sqs")
+
+        self.logger.info(
+            "SQS queue initialized",
+            queue_url=self.queue_url,
+            visibility_timeout=self.visibility_timeout,
+        )
+
+    def put(self, job: QueueJob) -> str | None:
+        """Send a job to the SQS queue."""
+        try:
+            response = self.sqs.send_message(
+                QueueUrl=self.queue_url,
+                MessageBody=job.model_dump_json(),
+            )
+            message_id = response.get("MessageId")
+            self.logger.debug(
+                "Put job in SQS queue",
+                job=job,
+                message_id=message_id,
+            )
+            return message_id
+        except self._ClientError:
+            self.logger.exception("Failed to put job in SQS queue", job=job)
+            return None
+
+    def get(self) -> QueueMessage | None:
+        """
+        Returns a QueueMessage with the job and receipt handle.
+        """
+        try:
+            response = self.sqs.receive_message(
+                QueueUrl=self.queue_url,
+                MaxNumberOfMessages=1,
+                VisibilityTimeout=self.visibility_timeout,
+                WaitTimeSeconds=20,  # Long polling
+            )
+
+            messages = response.get("Messages", [])
+            if not messages:
+                return None
+
+            message = messages[0]
+            receipt_handle = message["ReceiptHandle"]
+
+            job = queue_job_type_adapter.validate_json(message["Body"])
+
+            self.logger.debug(
+                "Retrieved job from SQS queue",
+                message_id=message.get("MessageId"),
+                receipt_handle=receipt_handle[:20] + "...",
+            )
+
+            return QueueMessage(job=job, receipt_handle=receipt_handle)
+
+        except self._ClientError:
+            self.logger.exception("Failed to get job from SQS queue")
+            return None
+
+    def ack(self, receipt_handle: str) -> bool:
+        """
+        Acknowledge a message by deleting it from the queue.
+
+        Returns True if successful, False otherwise.
+        """
+        try:
+            self.sqs.delete_message(
+                QueueUrl=self.queue_url,
+                ReceiptHandle=receipt_handle,
+            )
+            self.logger.debug(
+                "Acknowledged job in SQS queue",
+                receipt_handle=receipt_handle[:20] + "...",
+            )
+            return True
+        except self._ClientError:
+            self.logger.exception(
+                "Failed to acknowledge job in SQS queue",
+                receipt_handle=receipt_handle[:20] + "...",
+            )
+            return False
+
+    def size(self) -> int:
+        """
+        Get approximate number of messages in the queue.
+
+        Note: SQS provides approximate counts, not exact.
+        """
+        try:
+            response = self.sqs.get_queue_attributes(
+                QueueUrl=self.queue_url,
+                AttributeNames=["ApproximateNumberOfMessages"],
+            )
+            return int(
+                response.get("Attributes", {}).get("ApproximateNumberOfMessages", 0),
+            )
+        except self._ClientError:
+            self.logger.exception("Failed to get SQS queue size")
             return 0

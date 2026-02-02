@@ -92,9 +92,12 @@ class DiscoveryEntryRepository:
     @stats.timed("v2.repository.discovery_entry.save_ms")
     def save(self, entry: DiscoveryEntry) -> bool:
         stats.histogram(
-            "v2.worker.repository.discovery_entry.size",
+            "v2.repository.discovery_entry.size",
             len(entry.response.model_dump_json()) if entry.response else 0,
-            tags=[f"template:{entry.template}"],
+            tags=[
+                f"template:{entry.template}",
+                f"partition:{entry.request.node.cluster}",
+            ],
         )
         return self.data_store.set(DataType.DiscoveryEntry, entry.request_hash, entry)
 

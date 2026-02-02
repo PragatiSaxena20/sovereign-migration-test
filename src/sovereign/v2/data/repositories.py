@@ -35,6 +35,12 @@ class DiscoveryEntryRepository:
     def __init__(self, data_store: DataStoreProtocol):
         self.data_store = data_store
 
+    @stats.timed("v2.repository.discovery_entry.clear_rendering_started_at_ms")
+    def clear_rendering_started_at(self, request_hash: str) -> bool:
+        return self.data_store.set_property(
+            DataType.DiscoveryEntry, request_hash, "rendering_started_at", None
+        )
+
     @stats.timed("v2.repository.discovery_entry.get_ms")
     def get(self, request_hash: str) -> DiscoveryEntry | None:
         return self.data_store.get(DataType.DiscoveryEntry, request_hash)
@@ -45,16 +51,33 @@ class DiscoveryEntryRepository:
             DataType.DiscoveryEntry, request_hash, "rendering_started_at"
         )
 
-    @stats.timed("v2.repository.discovery_entry.set_rendering_started_at_ms")
-    def set_rendering_started_at(
-        self, request_hash: str, rendering_started_at: int | None
-    ) -> bool:
-        return self.data_store.set_property(
+    @stats.timed("v2.repository.discovery_entry.get_and_check_last_rendered_at_ms")
+    def get_and_check_last_rendered_at(
+        self, request_hash: str, now: int, rendering_timeout_seconds: int
+    ) -> tuple[bool, int]:
+        """
+        Atomically checks and claims a rendering slot for a discovery entry.
+
+        This method implements a distributed locking mechanism for rendering. It attempts
+        to set `rendering_started_at` to the current time if either:
+        - No rendering has started yet (rendering_started_at is None), or
+        - The previous rendering has timed out (rendering_started_at <= now - rendering_timeout_seconds)
+
+        Returns:
+            A tuple of (acquired, timestamp) where:
+            - acquired: True if this caller successfully claimed the rendering slot.
+            - timestamp: The rendering_started_at value (either the newly set time if acquired,
+              or the existing time if another worker is already rendering).
+        """
+        (updated, value) = self.data_store.set_and_get_property_if_null_or_matching(
             DataType.DiscoveryEntry,
             request_hash,
             "rendering_started_at",
-            rendering_started_at,
+            now,
+            ComparisonOperator.LessThanOrEqualTo,
+            now - rendering_timeout_seconds,
         )
+        return updated, int(value)
 
     @stats.timed("v2.repository.discovery_entry.find_by_template_ms")
     def find_all_request_hashes_by_template(self, template: str) -> list[str]:

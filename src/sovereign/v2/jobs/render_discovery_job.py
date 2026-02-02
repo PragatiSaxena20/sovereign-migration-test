@@ -35,10 +35,6 @@ def render_discovery_response(
         thread_id=threading.get_ident(),
     )
 
-    # Maximum time (in seconds) to consider a rendering job as still in progress
-    # If rendering_started_at is within this window and no response exists, skip this job
-    rendering_timeout_seconds = config.cache.read_timeout
-
     try:
         logger.debug("Starting rendering of discovery response")
 
@@ -48,13 +44,23 @@ def render_discovery_response(
             logger.error("No discovery entry found for request hash")
             return True  # don't retry this job, it won't succeed
 
-        # Check if another job is already rendering this request
-        # If rendering_started_at is set recently and there's no response yet, skip this duplicate job
         now = int(time.time())
-        if (
-            discovery_entry.rendering_started_at is not None
-            and (now - discovery_entry.rendering_started_at) < rendering_timeout_seconds
-        ):
+
+        # maximum time (in seconds) to consider a rendering job as still in progress
+        # if rendering_started_at is within this window and no response exists, skip this render
+        rendering_timeout_seconds = config.cache.read_timeout
+
+        # check if another job is already rendering this request
+        # if rendering_started_at is set recently and there's no response yet, skip this duplicate job
+        # mark this request as being rendered to prevent duplicate jobs
+        # this is cleared in the finally block if rendering fails
+        (should_render, last_rendered_at) = (
+            discovery_entry_repository.get_and_check_last_rendered_at(
+                request_hash, now, rendering_timeout_seconds
+            )
+        )
+
+        if not should_render:
             logger.info(
                 "Skipping duplicate rendering job - another job is already rendering this request",
                 rendering_started_at=discovery_entry.rendering_started_at,
@@ -68,10 +74,6 @@ def render_discovery_response(
                 ],
             )
             return True  # don't retry, another job is handling it
-
-        # Mark this request as being rendered to prevent duplicate jobs
-        # This is cleared in the finally block if rendering fails
-        discovery_entry_repository.set_rendering_started_at(request_hash, now)
 
         request = discovery_entry.request
 
@@ -96,6 +98,7 @@ def render_discovery_response(
                 ]
 
                 # if the context is not configured, assume that it's optional and remove it from the list
+                # we will get an error below when we try to render the template if it is really required
                 for name in list(missing_contexts):
                     if name not in config.template_context.context:
                         logger.debug(
@@ -187,18 +190,17 @@ def render_discovery_response(
                     request=request,
                     response=response,
                     last_rendered_at=int(time.time()),
-                    rendering_started_at=None,  # Reset after successful rendering
+                    rendering_started_at=None,  # reset after successful rendering
                 )
             ):
                 logger.error("Failed to save discovery entry")
                 return False
 
             return True
-        finally:
-            # Clear rendering_started_at if we didn't complete successfully
-            # (successful completion sets it to None in the save above)
-            entry = discovery_entry_repository.get(request_hash)
-            if entry and entry.rendering_started_at is not None:
-                discovery_entry_repository.set_rendering_started_at(request_hash, None)
+        except Exception:
+            # clear rendering_started_at if we've failed to render (successful render clears it above when the entry
+            # is saved)
+            discovery_entry_repository.clear_rendering_started_at(request_hash)
+            return False
     finally:
         logger.debug("Finished rendering of discovery response")

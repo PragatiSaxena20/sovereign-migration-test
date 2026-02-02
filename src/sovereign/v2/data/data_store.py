@@ -8,7 +8,7 @@ from structlog.typing import FilteringBoundLogger
 
 from sovereign import config
 from sovereign.types import DiscoveryRequest, DiscoveryResponse
-from sovereign.v2.logging import get_named_logger, capture_exception
+from sovereign.v2.logging import capture_exception, get_named_logger
 from sovereign.v2.types import Context, DiscoveryEntry, WorkerNode
 
 
@@ -74,6 +74,29 @@ class DataStoreProtocol(Protocol):
     def set_property(
         self, data_type: DataType, key: str, property_name: str, property_value: Any
     ) -> bool: ...
+    def set_and_get_property_if_null_or_matching(
+        self,
+        data_type: DataType,
+        key: str,
+        property_name: str,
+        new_property_value: Any,
+        comparison_operator: ComparisonOperator,
+        match_property_value: Any,
+    ) -> tuple[bool, Any | None]:
+        """
+        Conditionally sets a property and returns the result.
+
+        Sets the property to `new_property_value` if either:
+        - The current property value is None, or
+        - The current property value matches `match_property_value` using the given `comparison_operator`
+
+        Returns:
+            A tuple of (success, value) where:
+            - If the item doesn't exist: (False, None)
+            - If the property was updated: (True, new_property_value)
+            - If the condition wasn't met: (False, current_value)
+        """
+        ...
 
 
 class InMemoryDataStore(DataStoreProtocol):
@@ -206,7 +229,28 @@ class InMemoryDataStore(DataStoreProtocol):
         setattr(item, property_name, property_value)
         return True
 
+    def set_and_get_property_if_null_or_matching(
+        self,
+        data_type: DataType,
+        key: str,
+        property_name: str,
+        new_property_value: Any,
+        comparison_operator: ComparisonOperator,
+        match_property_value: Any,
+    ) -> tuple[bool, Any | None]:
+        item = self.get(data_type, key)
+        if item is None:
+            return False, None
+        current_value = getattr(item, property_name)
+        if current_value is None or self._compare(
+            current_value, comparison_operator, match_property_value
+        ):
+            setattr(item, property_name, new_property_value)
+            return True, new_property_value
+        return False, current_value
 
+
+# noinspection DuplicatedCode
 class SqliteDataStore(DataStoreProtocol):
     def __init__(self):
         self.logger: FilteringBoundLogger = get_named_logger(
@@ -711,3 +755,67 @@ class SqliteDataStore(DataStoreProtocol):
             )
             capture_exception(e)
             return False
+
+    def set_and_get_property_if_null_or_matching(
+        self,
+        data_type: DataType,
+        key: str,
+        property_name: str,
+        new_property_value: Any,
+        comparison_operator: ComparisonOperator,
+        match_property_value: Any,
+    ) -> tuple[bool, Any | None]:
+        table = self._get_table_name(data_type)
+        primary_key_column = self._get_primary_key(data_type)
+        property_column = self._validate_column(data_type, property_name)
+
+        if property_column is None:
+            self.logger.error(
+                "Cannot set property, invalid column name",
+                data_type=data_type,
+                column=property_name,
+            )
+            return False, None
+
+        operator = self._get_operator_sql(comparison_operator)
+
+        # INSERT a new row if it doesn't exist                                  -> we set the value
+        # UPDATE if the row exists and the column is null and condition matched -> we set the value
+        # do nothing if the row exists and the column is not null               -> existing value is preserved
+        sql = f"""
+            INSERT INTO {table} ({primary_key_column}, {property_column})
+            VALUES (?, ?)
+            ON CONFLICT({primary_key_column}) DO
+                UPDATE SET {property_column} = ?
+                WHERE {property_column} IS NULL OR {property_column} {operator} ?
+            RETURNING {property_column}
+        """
+
+        conn = self._get_connection()
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                sql, (key, new_property_value, new_property_value, match_property_value)
+            )
+            row = cursor.fetchone()
+            conn.commit()
+
+            if row:
+                # RETURNING returned a value, meaning we inserted or updated
+                return True, row[0]
+            else:
+                # no row returned means the ON CONFLICT condition wasn't met (value was not NULL)
+                # we need to fetch the existing value
+                current_value = self.get_property(data_type, key, property_name)
+                return False, current_value
+        except (sqlite3.Error, ValueError) as e:
+            self.logger.exception(
+                "Error setting property",
+                data_type=data_type,
+                key=key,
+                property=property_name,
+                value=new_property_value,
+            )
+            capture_exception(e)
+            return False, None

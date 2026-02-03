@@ -67,15 +67,12 @@ class DataStoreProtocol(Protocol):
     def get_property(
         self, data_type: DataType, key: str, property_name: str
     ) -> Any | None: ...
-    def min_by_property(
+    def max_by_property(
         self,
         data_type: DataType,
         property_name: str,
     ) -> Any | None: ...
     def set(self, data_type: DataType, key: str, value: Any) -> bool: ...
-    def set_property(
-        self, data_type: DataType, key: str, property_name: str, property_value: Any
-    ) -> bool: ...
     def set_and_get_property_if_null_or_matching(
         self,
         data_type: DataType,
@@ -99,6 +96,10 @@ class DataStoreProtocol(Protocol):
             - If the condition wasn't met: (False, current_value)
         """
         ...
+
+    def set_property(
+        self, data_type: DataType, key: str, property_name: str, property_value: Any
+    ) -> bool: ...
 
 
 class InMemoryDataStore(DataStoreProtocol):
@@ -210,7 +211,7 @@ class InMemoryDataStore(DataStoreProtocol):
             return getattr(value, property_name)
         return None
 
-    def min_by_property(
+    def max_by_property(
         self,
         data_type: DataType,
         property_name: str,
@@ -218,7 +219,7 @@ class InMemoryDataStore(DataStoreProtocol):
         store = self.stores[data_type]
         if not store:
             return None
-        return min(store.values(), key=lambda item: getattr(item, property_name))
+        return max(store.values(), key=lambda item: getattr(item, property_name))
 
     def set(self, data_type: DataType, key: str, value: Any) -> bool:
         store: dict[str, Any] = self.stores[data_type]
@@ -388,9 +389,9 @@ class SqliteDataStore(DataStoreProtocol):
         if isinstance(obj, Context):
             try:
                 pickled = pickle.dumps(obj.data)
-            except TypeError as e:
-                self.logger.error("Failed to pickle context data", name=obj.name)
-                raise e
+            except TypeError:
+                self.logger.exception("Failed to pickle context data", name=obj.name)
+                raise
 
             return {
                 "name": obj.name,
@@ -663,7 +664,7 @@ class SqliteDataStore(DataStoreProtocol):
             capture_exception(e)
             return None
 
-    def min_by_property(
+    def max_by_property(
         self,
         data_type: DataType,
         property_name: str,
@@ -679,7 +680,7 @@ class SqliteDataStore(DataStoreProtocol):
             )
             return None
 
-        sql = f"SELECT * FROM {table} ORDER BY {column} ASC LIMIT 1"
+        sql = f"SELECT * FROM {table} ORDER BY {column} DESC LIMIT 1"
 
         conn = self._get_connection()
 
@@ -720,45 +721,6 @@ class SqliteDataStore(DataStoreProtocol):
                 data_type=data_type,
                 key=key,
                 values=value_dict,
-            )
-            capture_exception(e)
-            return False
-
-    def set_property(
-        self, data_type: DataType, key: str, property_name: str, property_value: Any
-    ) -> bool:
-        table = self._get_table_name(data_type)
-        primary_key_column = self._get_primary_key(data_type)
-        property_column = self._validate_column(data_type, property_name)
-
-        if property_column is None:
-            self.logger.error(
-                "Cannot set property, invalid column name",
-                data_type=data_type,
-                column=property_name,
-            )
-            return False
-
-        sql = f"""
-            INSERT INTO {table} ({primary_key_column}, {property_column})
-            VALUES (?, ?)
-            ON CONFLICT({primary_key_column}) DO UPDATE SET {property_column} = excluded.{property_column}
-        """
-
-        conn = self._get_connection()
-
-        try:
-            cursor = conn.cursor()
-            cursor.execute(sql, (key, property_value))
-            conn.commit()
-            return True
-        except (sqlite3.Error, ValueError) as e:
-            self.logger.exception(
-                "Error setting property",
-                data_type=data_type,
-                key=key,
-                property=property_name,
-                value=property_value,
             )
             capture_exception(e)
             return False
@@ -827,3 +789,42 @@ class SqliteDataStore(DataStoreProtocol):
             )
             capture_exception(e)
             return False, None
+
+    def set_property(
+        self, data_type: DataType, key: str, property_name: str, property_value: Any
+    ) -> bool:
+        table = self._get_table_name(data_type)
+        primary_key_column = self._get_primary_key(data_type)
+        property_column = self._validate_column(data_type, property_name)
+
+        if property_column is None:
+            self.logger.error(
+                "Cannot set property, invalid column name",
+                data_type=data_type,
+                column=property_name,
+            )
+            return False
+
+        sql = f"""
+            INSERT INTO {table} ({primary_key_column}, {property_column})
+            VALUES (?, ?)
+            ON CONFLICT({primary_key_column}) DO UPDATE SET {property_column} = excluded.{property_column}
+        """
+
+        conn = self._get_connection()
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, (key, property_value))
+            conn.commit()
+            return True
+        except (sqlite3.Error, ValueError) as e:
+            self.logger.exception(
+                "Error setting property",
+                data_type=data_type,
+                key=key,
+                property=property_name,
+                value=property_value,
+            )
+            capture_exception(e)
+            return False

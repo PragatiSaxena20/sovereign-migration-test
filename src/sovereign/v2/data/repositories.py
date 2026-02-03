@@ -114,7 +114,7 @@ class WorkerNodeRepository:
 
     @stats.timed("v2.repository.worker_node.get_leader_ms")
     def get_leader_node_id(self) -> str | None:
-        node: WorkerNode | None = self.data_store.min_by_property(
+        node: WorkerNode | None = self.data_store.max_by_property(
             DataType.WorkerNode, "node_id"
         )
         if node:

@@ -56,10 +56,6 @@ async def wait_for_discovery_response(
         )
         discovery_entry_repository.save(discovery_entry)
 
-        # enqueue a job to render this discovery request
-        job = RenderDiscoveryJob(request_hash=request_hash)
-        queue.put(job)
-
     if discovery_entry.response:
         logger.debug("Returning cached response immediately")
         stats.increment(
@@ -71,6 +67,10 @@ async def wait_for_discovery_response(
             ],
         )
         return discovery_entry.response
+
+    # enqueue a job to render this discovery request
+    job = RenderDiscoveryJob(request_hash=request_hash)
+    queue.put(job)
 
     # wait for up to CACHE_READ_TIMEOUT seconds for the response to be populated
     logger.debug(

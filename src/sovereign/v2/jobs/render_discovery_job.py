@@ -64,7 +64,6 @@ def render_discovery_response(
             logger.info(
                 "Skipping duplicate rendering job - another job is already rendering this request",
                 rendering_started_at=discovery_entry.rendering_started_at,
-                seconds_ago=now - discovery_entry.rendering_started_at,
             )
             stats.increment(
                 "v2.worker.job.render_discovery_response.skipped",

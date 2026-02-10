@@ -3,7 +3,6 @@ from sovereign.utils.entry_point_loader import EntryPointLoader
 from sovereign.v2.data.data_store import DataStoreProtocol, DataStorePurpose
 from sovereign.v2.data.worker_queue import QueueProtocol
 
-
 _data_store_web: DataStoreProtocol | None = None
 _data_store_worker: DataStoreProtocol | None = None
 

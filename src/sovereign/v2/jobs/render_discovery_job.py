@@ -3,6 +3,9 @@ import os
 import threading
 import time
 
+from structlog.typing import FilteringBoundLogger
+
+from sovereign import config, disabled_ciphersuite, server_cipher_container, stats
 from sovereign.rendering_common import (
     add_type_urls,
     deserialize_config,
@@ -13,15 +16,14 @@ from sovereign.utils import templates
 from sovereign.v2.data.repositories import ContextRepository, DiscoveryEntryRepository
 from sovereign.v2.logging import get_named_logger
 from sovereign.v2.types import Context, DiscoveryEntry
-from structlog.typing import FilteringBoundLogger
-
-from sovereign import config, disabled_ciphersuite, server_cipher_container, stats
 
 
+# noinspection DuplicatedCode
 def render_template_to_response(
     request: DiscoveryRequest,
+    request_hash: str,
+    node_id: str,
     context_repository: ContextRepository,
-    logger: FilteringBoundLogger,
 ) -> DiscoveryResponse | None:
     """Render an xDS template to a DiscoveryResponse without persisting.
 
@@ -29,6 +31,16 @@ def render_template_to_response(
     Used by both the worker queue path (via render_discovery_response)
     and the inline render_inline path (via web.py).
     """
+    logger: FilteringBoundLogger = get_named_logger(
+        f"{__name__}.{render_discovery_response.__qualname__} ({__file__})",
+        level=logging.DEBUG,
+    ).bind(
+        request_hash=request_hash,
+        node_id=node_id,
+        process_id=os.getpid(),
+        thread_id=threading.get_ident(),
+    )
+
     dependencies = request.template.depends_on
     contexts: dict[str, Context | None] = {
         name: context_repository.get(name) for name in dependencies
@@ -198,7 +210,9 @@ def render_discovery_response(
                     )
                     return True
 
-            response = render_template_to_response(request, context_repository, logger)
+            response = render_template_to_response(
+                request, request_hash, node_id, context_repository
+            )
             if response is None:
                 return False
 

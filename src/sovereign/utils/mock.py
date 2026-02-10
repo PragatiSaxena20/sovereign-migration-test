@@ -1,11 +1,11 @@
 import ast
 import re
 from random import randint
-from typing import Dict, List, Optional
+from typing import Any
 
 from sovereign.types import DiscoveryRequest, Locality, Node, Status
 
-scrub = re.compile(r"[^a-zA-Z_\.]")
+scrub = re.compile(r"[^a-zA-Z_\\.]")
 
 
 class NodeExpressionError(Exception):
@@ -13,14 +13,14 @@ class NodeExpressionError(Exception):
 
 
 def mock_discovery_request(
-    api_version: Optional[str] = "V3",
-    resource_type: Optional[str] = None,
-    resource_names: Optional[List[str] | str] = None,
-    region: Optional[str] = "none",
-    version: Optional[str] = "<envoy_version>",
-    metadata: Optional[Dict[str, str]] = None,
-    error_message: Optional[str] = None,
-    expressions: Optional[list[str]] = None,
+    api_version: str | None = "V3",
+    resource_type: str | None = None,
+    resource_names: list[str] | str | None = None,
+    region: str | None = "none",
+    version: str | None = "<envoy_version>",
+    metadata: dict[str, Any] | None = None,
+    error_message: str | None = None,
+    expressions: list[str] | None = None,
 ) -> DiscoveryRequest:
     if resource_names is None:
         resource_names = []
@@ -32,7 +32,7 @@ def mock_discovery_request(
         id="sovereign-interface",
         cluster="*",
         build_version=f"<randomHash>/{version}/Clean/RELEASE",
-        locality=Locality(zone=region),
+        locality=Locality(region=None, zone=region, sub_zone=None),
     ).model_dump()
     set_node_expressions(base_node, expressions)
     request = DiscoveryRequest(

@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
 import pytest
+from starlette_context import context
+
 from sovereign.types import DiscoveryResponse
 from sovereign.utils.mock import mock_discovery_request
 from sovereign.v2.data.data_store import InMemoryDataStore
@@ -8,7 +10,6 @@ from sovereign.v2.data.repositories import DiscoveryEntryRepository
 from sovereign.v2.data.worker_queue import InMemoryQueue
 from sovereign.v2.types import DiscoveryEntry
 from sovereign.v2.web import wait_for_discovery_response
-from starlette_context import context
 
 
 @pytest.fixture(scope="function")
@@ -65,6 +66,7 @@ async def test_render_inline_renders_inline(
     assert context.data.get("XDS_RESPONSE_SOURCE") == "inline"
 
 
+# noinspection DuplicatedCode
 @pytest.mark.asyncio
 async def test_no_render_inline_uses_normal_flow(
     data_store: InMemoryDataStore,
@@ -88,7 +90,7 @@ async def test_no_render_inline_uses_normal_flow(
         mock_config.cache.hash_rules = []
         mock_config.cache.read_timeout = 0.1
         mock_config.cache.poll_interval_secs = 0.05
-        result = await wait_for_discovery_response(request)
+        await wait_for_discovery_response(request)
 
     # render_template_to_response should NOT have been called directly
     mock_render.assert_not_called()
@@ -97,6 +99,7 @@ async def test_no_render_inline_uses_normal_flow(
     assert not queue.is_empty(), "A render job should have been queued"
 
 
+# noinspection DuplicatedCode
 @pytest.mark.asyncio
 async def test_empty_render_inline_uses_normal_flow(
     data_store: InMemoryDataStore,
@@ -119,7 +122,7 @@ async def test_empty_render_inline_uses_normal_flow(
         mock_config.cache.hash_rules = []
         mock_config.cache.read_timeout = 0.1
         mock_config.cache.poll_interval_secs = 0.05
-        result = await wait_for_discovery_response(request)
+        await wait_for_discovery_response(request)
 
     # render_template_to_response should NOT have been called (empty string is falsy)
     mock_render.assert_not_called()

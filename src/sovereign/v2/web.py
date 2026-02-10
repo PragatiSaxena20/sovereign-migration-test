@@ -34,14 +34,21 @@ async def wait_for_discovery_response(
 
     data_store = get_data_store_web()
 
+    request_hash = request.cache_key(config.cache.hash_rules)
+    logger = logger.bind(request_hash=request_hash)
+
     # render_inline: render inline without persisting to avoid unbounded growth
     sovereign_metadata = request.node.metadata.get("sovereign", {})
     if sovereign_metadata.get("render_inline"):
-        logger.info("render_inline detected, rendering inline without persisting")
+        logger.info("Inline render requested")
         context_repository = ContextRepository(data_store)
         try:
             response = await asyncio.to_thread(
-                render_template_to_response, request, context_repository, logger
+                render_template_to_response,
+                request,
+                request_hash,
+                "inline",
+                context_repository,
             )
         except Exception:
             logs.access_logger.queue_log_fields(XDS_RESPONSE_SOURCE="inline")
@@ -56,9 +63,6 @@ async def wait_for_discovery_response(
         )
         logs.access_logger.queue_log_fields(XDS_RESPONSE_SOURCE="inline")
         return response
-
-    request_hash = request.cache_key(config.cache.hash_rules)
-    logger = logger.bind(request_hash=request_hash)
 
     logger.debug("Starting lookup for discovery response")
 

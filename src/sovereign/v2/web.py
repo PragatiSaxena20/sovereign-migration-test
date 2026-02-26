@@ -75,9 +75,7 @@ async def wait_for_discovery_response(
     discovery_entry = discovery_entry_repository.get(request_hash)
 
     if not discovery_entry:
-        logger.debug(
-            "No existing discovery entry found, creating new entry and enqueuing job"
-        )
+        logger.debug("No existing discovery entry found, saving new entry")
 
         # we need to save this request to the database
         discovery_entry = DiscoveryEntry(
@@ -107,7 +105,12 @@ async def wait_for_discovery_response(
 
     # enqueue a job to render this discovery request
     job = RenderDiscoveryJob(request_hash=request_hash)
-    queue.put(job)
+    job_id = queue.put(job)
+    logger.debug(
+        "No existing discovery entry response found, enqueuing job",
+        job=job,
+        job_id=job_id,
+    )
 
     # wait for up to CACHE_READ_TIMEOUT seconds for the response to be populated
     logger.debug(

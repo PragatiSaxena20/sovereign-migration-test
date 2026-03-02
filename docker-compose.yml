@@ -17,6 +17,7 @@ services:
       SOVEREIGN_AUTH_PASSWORDS: 'helloworld,2398yud32r9y#@8d23rydr398d2r39y@@2rd39nd2%%r3y98!!!!' # Example passwords
       SOVEREIGN_CONFIG: file://test/config/config.yaml
       SOVEREIGN_DEBUG: 'yes'
+      SOVEREIGN_DEPLOYMENT_ID: 'local'
       SOVEREIGN_ENCRYPTION_KEY: > # This key is for local development only
         dU9QkiO3JTDdVXzgtUqr_HPuH4hbLBarrAQmsM1_PKk=:fernet
         KjDxQrHuNrPRHICv1Qef6Sr_XHxsv7oarJdwB98R2wk=:fernet

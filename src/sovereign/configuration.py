@@ -35,6 +35,10 @@ from sovereign.utils import dictupdate
 from sovereign.utils.crypto.suites import EncryptionType
 
 
+def default_deployment_id():
+    return "unknown"
+
+
 def default_worker_node_id():
     # Best effort to acquire a stable and unique id
     return f"{time.time()}{random.randint(0, 1000000)}"
@@ -455,6 +459,8 @@ def default_hash_rules():
         "resource_names",
         "node.cluster",
         "node.locality",
+        # Deployments
+        "deployment_id",
     ]
 
 
@@ -513,6 +519,11 @@ class SovereignConfigv2(BaseSettings):
 
     # Cache
     cache: CacheConfiguration = CacheConfiguration()
+
+    # Deployment
+    deployment_id: str = Field(
+        default_factory=default_deployment_id, alias="SOVEREIGN_DEPLOYMENT_ID"
+    )
 
     # Worker
     worker_host: Optional[str] = Field("localhost", alias="SOVEREIGN_WORKER_HOST")
@@ -579,6 +590,21 @@ class SovereignConfigv2(BaseSettings):
         populate_by_name=True,
     )
 
+    @field_validator("deployment_id", mode="before")
+    @classmethod
+    def setup_deployment_id(cls, v: str | dict | Loadable | None) -> str:
+        if isinstance(v, dict):
+            v = Loadable(**v).load()
+        elif isinstance(v, str):
+            v = Loadable.from_legacy_fmt(v).load()
+        elif isinstance(v, Loadable):
+            v = v.load()
+
+        if not isinstance(v, str):
+            raise ValueError("Deployment ID must be a string")
+
+        return v
+
     @field_validator("worker_v2_node_id", mode="before")
     @classmethod
     def setup_node_id(cls, v: str | dict | Loadable | None) -> str:
@@ -590,7 +616,7 @@ class SovereignConfigv2(BaseSettings):
             v = v.load()
 
         if not isinstance(v, str):
-            raise ValueError("Worker node id must be a string")
+            raise ValueError("Worker node ID must be a string")
 
         return v
 

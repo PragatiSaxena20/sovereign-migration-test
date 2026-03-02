@@ -66,6 +66,8 @@ class Worker:
             thread_id=threading.get_ident(),
         )
 
+        logger.info("Starting worker", deployment_id=config.deployment_id)
+
         # pull from the queue for eternity and process the messages
         while True:
             job_logger = logger

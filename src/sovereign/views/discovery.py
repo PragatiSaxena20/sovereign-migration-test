@@ -57,6 +57,7 @@ async def discovery_response(
     xds_req.desired_controlplane = host
     xds_req.resource_type = xds_type
     xds_req.api_version = version
+    xds_req.deployment_id = config.deployment_id
     if xds_req.error_detail:
         logs.access_logger.queue_log_fields(
             XDS_ERROR_DETAIL=xds_req.error_detail.message

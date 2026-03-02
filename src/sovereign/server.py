@@ -64,9 +64,9 @@ def web(supervisor_enabled=True) -> None:
     if config.worker_v2_enabled:
         from sovereign.v2.data.utils import get_context_repository_web
 
-        log.info("Pre-warming context")
+        # log.info("Pre-warming context")
         get_context_repository_web()
-        log.info("Context warmup complete")
+        # log.info("Context warmup complete")
 
     log.debug("Starting web server")
 

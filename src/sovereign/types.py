@@ -214,6 +214,9 @@ class DiscoveryRequest(BaseModel):
     desired_controlplane: str | None = Field(
         None, title="The host header provided in the Discovery Request"
     )
+    deployment_id: str | None = Field(
+        None, title="Deployment identifier used for cache hashing"
+    )
     # Pydantic
     model_config = ConfigDict(extra="ignore")
 

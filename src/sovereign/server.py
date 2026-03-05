@@ -4,6 +4,7 @@ import os
 import tempfile
 import warnings
 from pathlib import Path
+from typing import Callable, cast
 
 import uvicorn
 
@@ -50,7 +51,10 @@ def get_available_cpus() -> int:
     try:
         # Use sched_getaffinity if available (Linux)
         # This respects CPU affinity masks set by Docker --cpuset-cpus
-        return len(os.sched_getaffinity(0))
+        sched_getaffinity = getattr(os, "sched_getaffinity", None)
+        if callable(sched_getaffinity):
+            affinity = cast(Callable[[int], set[int]], sched_getaffinity)(0)
+            return len(affinity)
     except (AttributeError, OSError):
         pass
 

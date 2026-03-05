@@ -13,7 +13,7 @@ from structlog.typing import FilteringBoundLogger
 from sovereign.configuration import config
 
 
-def capture_exception(exc: BaseException) -> None:
+def capture_exception(e: BaseException) -> None:
     """
     Capture an exception and send it to Sentry if configured.
 
@@ -23,7 +23,7 @@ def capture_exception(exc: BaseException) -> None:
     if config.sentry_dsn.get_secret_value():
         try:
             mod = importlib.import_module("sentry_sdk")
-            mod.capture_exception(exc)
+            mod.capture_exception(e)
         except ImportError:
             pass
 

@@ -13,8 +13,10 @@ from sovereign.rendering_common import (
 )
 from sovereign.types import DiscoveryRequest, DiscoveryResponse, ProcessedTemplate
 from sovereign.utils import templates
+from sovereign.v2.data.data_store import ContextUnpickleError
 from sovereign.v2.data.repositories import ContextRepository, DiscoveryEntryRepository
-from sovereign.v2.logging import get_named_logger
+from sovereign.v2.jobs.refresh_context import refresh_context
+from sovereign.v2.logging import get_named_logger, capture_exception
 from sovereign.v2.types import Context, DiscoveryEntry
 
 
@@ -24,6 +26,7 @@ def render_template_to_response(
     request_hash: str,
     node_id: str,
     context_repository: ContextRepository,
+    discovery_entry_repository: DiscoveryEntryRepository,
 ) -> DiscoveryResponse | None:
     """Render an xDS template to a DiscoveryResponse without persisting.
 
@@ -42,9 +45,55 @@ def render_template_to_response(
     )
 
     dependencies = request.template.depends_on
-    contexts: dict[str, Context | None] = {
-        name: context_repository.get(name) for name in dependencies
-    }
+    contexts: dict[str, Context | None] = {}
+
+    for context_name in dependencies:
+        try:
+            contexts[context_name] = context_repository.get(context_name)
+        except ContextUnpickleError as e:
+            logger.exception(
+                "Failed to unpickle context for rendering",
+                context=context_name,
+            )
+            capture_exception(e)
+            logger.info(
+                "Clearing context data with unpickle error to force refresh",
+                context=context_name,
+            )
+            context_repository.delete(context_name)
+            try:
+                refresh_context(
+                    context_name,
+                    node_id,
+                    config,
+                    context_repository,
+                    discovery_entry_repository,
+                    # don't send the queue as we don't need (or want) to enqueue any additional rendering jobs
+                    # triggered by this refresh
+                    queue=None,
+                )
+            except ContextUnpickleError as inner_e:
+                logger.exception(
+                    "Context refresh raised unpickle error",
+                    context=context_name,
+                )
+                capture_exception(inner_e)
+
+                contexts[context_name] = None
+                continue
+
+            # try again now that we've forced a refresh - if it still fails, we'll skip this context and likely fail to
+            # render, but at least we won't be stuck in a loop of trying to refresh a broken context
+            try:
+                contexts[context_name] = context_repository.get(context_name)
+            except ContextUnpickleError as inner_e:
+                logger.exception(
+                    "Failed to unpickle context after refresh",
+                    context=context_name,
+                )
+                capture_exception(inner_e)
+
+                contexts[context_name] = None
 
     missing_contexts = [
         name
@@ -71,8 +120,8 @@ def render_template_to_response(
         return None
 
     raw_contexts = {
-        name: context.data
-        for (name, context) in contexts.items()
+        context_name: context.data
+        for (context_name, context) in contexts.items()
         if context is not None
     }
 
@@ -182,37 +231,43 @@ def render_discovery_response(
 
                 # Check if we can skip rendering based on context freshness
                 dependencies = request.template.depends_on
-                contexts: dict[str, Context | None] = {
-                    name: context_repository.get(name) for name in dependencies
+                refresh_times: dict[str, int | None] = {
+                    name: context_repository.get_last_refreshed_at(name)
+                    for name in dependencies
                 }
-                refresh_times = [
-                    context.last_refreshed_at
-                    for context in contexts.values()
-                    if context is not None and context.last_refreshed_at is not None
-                ]
 
             if refresh_times:
-                latest_context_refresh = max(refresh_times)
+                refresh_time_values = [
+                    refresh_time
+                    for refresh_time in refresh_times.values()
+                    if refresh_time is not None
+                ]
+                if refresh_time_values:
+                    latest_context_refresh: int = max(refresh_time_values)
 
-                if (
-                    discovery_entry.last_rendered_at
-                    and latest_context_refresh < discovery_entry.last_rendered_at
-                ):
-                    # the template was last rendered after all the contexts were refreshed, so we can skip rendering
-                    logger.info(
-                        "Skipping rendering for duplicate job - template already up to date"
-                    )
-                    stats.increment(
-                        "v2.worker.job.render_discovery_response.skipped",
-                        tags=[
-                            "reason:already_up_to_date",
-                            f"template:{discovery_entry.template}",
-                        ],
-                    )
-                    return True
+                    if (
+                        discovery_entry.last_rendered_at
+                        and latest_context_refresh < discovery_entry.last_rendered_at
+                    ):
+                        # the template was last rendered after all the contexts were refreshed, so we can skip rendering
+                        logger.info(
+                            "Skipping rendering for duplicate job - template already up to date"
+                        )
+                        stats.increment(
+                            "v2.worker.job.render_discovery_response.skipped",
+                            tags=[
+                                "reason:already_up_to_date",
+                                f"template:{discovery_entry.template}",
+                            ],
+                        )
+                        return True
 
             response = render_template_to_response(
-                request, request_hash, node_id, context_repository
+                request,
+                request_hash,
+                node_id,
+                context_repository,
+                discovery_entry_repository,
             )
             if response is None:
                 logger.debug(

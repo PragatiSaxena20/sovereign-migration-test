@@ -27,7 +27,7 @@ def refresh_context(
     config: SovereignConfigv2,
     context_repository: ContextRepository,
     discovery_job_repository: DiscoveryEntryRepository,
-    queue: QueueProtocol,
+    queue: QueueProtocol | None = None,
 ) -> bool:
     with stats.timed("v2.worker.job.refresh_context_ms", tags=[f"context:{name}"]):
         logger: FilteringBoundLogger = get_named_logger(
@@ -85,6 +85,13 @@ def refresh_context(
                         request_hash=request_hash,
                         template=template,
                     )
+                    if queue is None:
+                        logger.debug(
+                            "Skipping render queueing; no queue available",
+                            context=name,
+                            request_hash=request_hash,
+                        )
+                        continue
                     queue.put(RenderDiscoveryJob(request_hash=request_hash))
 
             return True

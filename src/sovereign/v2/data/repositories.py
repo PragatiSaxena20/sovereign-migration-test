@@ -1,8 +1,14 @@
 import copy
+import pickle
 import time
 
 from sovereign import config, stats
-from sovereign.v2.data.data_store import ComparisonOperator, DataStoreProtocol, DataType
+from sovereign.v2.data.data_store import (
+    ComparisonOperator,
+    ContextUnpickleError,
+    DataStoreProtocol,
+    DataType,
+)
 from sovereign.v2.types import Context, DiscoveryEntry, WorkerNode
 
 
@@ -60,11 +66,22 @@ class ContextRepository:
     def get_hash(self, name: str) -> int | None:
         return self.data_store.get_property(DataType.Context, name, "data_hash")
 
+    @stats.timed("v2.repository.context.get_last_refreshed_at_ms")
+    def get_last_refreshed_at(self, name: str) -> int | None:
+        return self.data_store.get_property(DataType.Context, name, "last_refreshed_at")
+
     def get_refresh_after(self, name: str) -> int | None:
         return self.data_store.get_property(DataType.Context, name, "refresh_after")
 
     @stats.timed("v2.repository.context.save_ms")
     def save(self, context: Context) -> bool:
+        # ensure that we can pickle and unpickle this context before saving it
+        try:
+            pickled = pickle.dumps(context.data)
+            pickle.loads(pickled)
+        except Exception as e:
+            raise ContextUnpickleError(context.name) from e
+
         result = self.data_store.set(DataType.Context, context.name, context)
         if result:
             self._cache[context.name] = copy.deepcopy(context)
@@ -77,6 +94,25 @@ class ContextRepository:
         result = self.data_store.set_property(
             DataType.Context, name, "refresh_after", refresh_after
         )
+        if result:
+            self._cache.pop(name, None)
+        return result
+
+    @stats.timed("v2.repository.context.delete_ms")
+    def delete(self, name: str) -> bool:
+        result = self.data_store.delete_matching(
+            DataType.Context,
+            "name",
+            ComparisonOperator.EqualTo,
+            name,
+        )
+        if result:
+            self._cache.pop(name, None)
+        return result
+
+    @stats.timed("v2.repository.context.clear_value_ms")
+    def clear_data(self, name: str) -> bool:
+        result = self.data_store.set_property(DataType.Context, name, "data", None)
         if result:
             self._cache.pop(name, None)
         return result

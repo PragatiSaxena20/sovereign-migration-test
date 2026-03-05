@@ -36,6 +36,8 @@ async def wait_for_discovery_response(
     )
 
     data_store = get_data_store_web()
+    discovery_entry_repository = DiscoveryEntryRepository(data_store)
+    queue = get_queue()
 
     request_hash = request.cache_key(
         config.cache.effective_hash_rules(request.resource_type)
@@ -53,6 +55,7 @@ async def wait_for_discovery_response(
                 request_hash,
                 "inline",
                 context_repository,
+                discovery_entry_repository,
             )
         except Exception:
             logs.access_logger.queue_log_fields(XDS_RESPONSE_SOURCE="inline")
@@ -69,10 +72,6 @@ async def wait_for_discovery_response(
         return response
 
     logger.debug("Starting lookup for discovery response")
-
-    discovery_entry_repository = DiscoveryEntryRepository(data_store)
-
-    queue = get_queue()
 
     discovery_entry = discovery_entry_repository.get(request_hash)
 

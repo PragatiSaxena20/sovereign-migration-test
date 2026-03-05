@@ -12,6 +12,15 @@ from sovereign.v2.logging import capture_exception, get_named_logger
 from sovereign.v2.types import Context, DiscoveryEntry, WorkerNode
 
 
+class ContextUnpickleError(Exception):
+    context_name: str
+
+    def __init__(self, context_name: str):
+        message = f"Failed to unpickle context data for '{context_name}'"
+        super().__init__(message)
+        self.context_name = context_name
+
+
 class ComparisonOperator(StrEnum):
     EqualTo = "equal_to"
     LessThanOrEqualTo = "less_than_or_equal_to"
@@ -451,8 +460,9 @@ class SqliteDataStore(DataStoreProtocol):
         if isinstance(obj, Context):
             try:
                 pickled = pickle.dumps(obj.data)
-            except TypeError:
+            except TypeError as e:
                 self.logger.exception("Failed to pickle context data", name=obj.name)
+                capture_exception(e)
                 raise
 
             return {

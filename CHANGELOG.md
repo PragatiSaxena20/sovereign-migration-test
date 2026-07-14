@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.32.9 14-07-2026
+-----------------
+
+* vulnfix: Update FastAPI and Starlette to resolve CVE-2026-54283
+
 0.32.8 14-05-2026
 -----------------
 

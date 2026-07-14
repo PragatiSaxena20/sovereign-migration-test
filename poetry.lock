@@ -2485,4 +2485,4 @@ ujson = ["ujson"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "ff2229f46ff3180226146d2333ea2ef0912338b6b643869b59f0e60146cdbf4d"
+content-hash = "7b3ef6be2da9d35490a28fb2c6ff98c28be1aff64cb30ab2a6ad71346a24bf66"

@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.32.10 20-07-2026
+------------------
+
+* vulnfix: Update cryptography from 46.0.5 to 46.0.7 to resolve CVE-2026-39892
+
 0.32.9 14-07-2026
 -----------------
 

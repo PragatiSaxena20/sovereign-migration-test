@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.32.11 17-09-2026
+------------------
+
+* vulnfix: Update cryptography from 46.0.7 to ^48.0.1 to resolve VULN-2292906 and allow future patch upgrades
+
 0.32.10 20-07-2026
 ------------------
 
